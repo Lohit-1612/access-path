@@ -30,6 +30,94 @@ interface DetectedObstacle {
   warning: string;
 }
 
+// Generate localized obstacle warning string
+function generateObstacleWarning(
+  label: string,
+  position: 'left' | 'center' | 'right',
+  distanceM: number,
+  lang: string
+): string {
+  const obstacleMap: Record<string, Record<string, string>> = {
+    construction: {
+      en: 'construction barricade',
+      ta: 'கட்டுமான தடை',
+      hi: 'निर्माण बाधा',
+      te: 'నిర్మాణ అడ్డంకి',
+      es: 'barricada de construcción',
+      fr: 'barricade de chantier',
+      de: 'Baustellenabsperrung'
+    },
+    stairs: {
+      en: 'flight of stairs',
+      ta: 'படிவரிசை',
+      hi: 'सीढ़ियाँ',
+      te: 'మెట్లు',
+      es: 'escaleras',
+      fr: 'escaliers',
+      de: 'Treppen'
+    },
+    damaged_surface: {
+      en: 'pothole or damaged surface',
+      ta: 'குழி அல்லது உடைந்த பாதை',
+      hi: 'गड्ढा या टूटी सतह',
+      te: 'గొయ్యి లేదా దెబ్బతిన్న రోడ్డు',
+      es: 'bache o superficie dañada',
+      fr: 'nid-de-poule ou sol abîmé',
+      de: 'Schlagloch'
+    },
+    blockage: {
+      en: 'obstacle or vehicle',
+      ta: 'வாகனம் அல்லது தடை',
+      hi: 'अड़चन या वाहन',
+      te: 'అడ్డంకి లేదా వాహనం',
+      es: 'vehículo u obstáculo',
+      fr: 'obstacle ou véhicule',
+      de: 'Hindernis'
+    }
+  };
+
+  const adviceMap: Record<string, Record<string, string>> = {
+    center: {
+      en: 'directly ahead. Stop or step aside.',
+      ta: 'நேராக உள்ளது. கவனமாக ஒதுங்கவும்.',
+      hi: 'सीधे आगे है। कृपया रुकें या हटें।',
+      te: 'ముందు ఉంది. పక్కకు వెళ్లండి.',
+      es: 'directamente adelante. Deténgase.',
+      fr: 'droit devant. Arrêtez-vous.',
+      de: 'direkt vor Ihnen. Bitte ausweichen.'
+    },
+    left: {
+      en: 'on your left. Please keep right.',
+      ta: 'இடதுபுறம் உள்ளது. வலதுபுறமாக செல்லவும்.',
+      hi: 'बाईं ओर है। कृपया दाईं ओर रहें।',
+      te: 'ఎడమవైపు ఉంది. కుడివైపు వెళ్లండి.',
+      es: 'a su izquierda. Manténgase a la derecha.',
+      fr: 'sur votre gauche. Serrez à droite.',
+      de: 'zu Ihrer Linken. Bitte rechts halten.'
+    },
+    right: {
+      en: 'on your right. Please keep left.',
+      ta: 'வலதுபுறம் உள்ளது. இடதுபுறமாக செல்லவும்.',
+      hi: 'दाईं ओर है। कृपया बाईं ओर रहें।',
+      te: 'కుడివైపు ఉంది. ఎడமవైపు వెళ్లండి.',
+      es: 'a su derecha. Manténgase a la izquierda.',
+      fr: 'sur votre droite. Serrez à gauche.',
+      de: 'zu Ihrer Rechten. Bitte links halten.'
+    }
+  };
+
+  const name = obstacleMap[label]?.[lang] || obstacleMap[label]?.['en'] || label;
+  const advice = adviceMap[position]?.[lang] || adviceMap[position]?.['en'] || 'Caution ahead.';
+
+  if (lang === 'ta') return `எச்சரிக்கை: ${distanceM} மீட்டரில் ${name} ${advice}`;
+  if (lang === 'hi') return `सावधान: ${distanceM} मीटर में ${name} ${advice}`;
+  if (lang === 'te') return `హెచ్చరిక: ${distanceM} మీటర్లలో ${name} ${advice}`;
+  if (lang === 'es') return `¡Atención: ${name} a ${distanceM} metros ${advice}`;
+  if (lang === 'fr') return `Attention: ${name} à ${distanceM} mètres ${advice}`;
+  if (lang === 'de') return `Achtung: ${name} in ${distanceM} Metern ${advice}`;
+  return `Caution: ${name} detected ${distanceM} meters ${advice}`;
+}
+
 export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
   selectedLanguage,
   onLanguageChange,
@@ -51,7 +139,7 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
   const scanIntervalRef = useRef<any>(null);
   const lastSpokenTimestampRef = useRef<number>(0);
 
-  // Start device camera
+  // Start device camera (default environment/rear)
   const startCamera = useCallback(async () => {
     try {
       if (streamRef.current) {
@@ -96,22 +184,36 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
     setIsCameraActive(false);
   }, []);
 
+  // Welcome announcement when camera is opened
   useEffect(() => {
     if (isOpen) {
       startCamera();
+      const welcomeMap: Record<string, string> = {
+        en: 'AI Walking Radar active. Point camera forward along your path.',
+        ta: 'செயற்கை நுண்ணறிவு நடைபாதை ரேடார் செயல்படுகிறது. கேமராவை முன்னோக்கி வைக்கவும்.',
+        hi: 'एआई वॉकिंग रडार सक्रिय है। कैमरे को आगे की ओर रखें।',
+        te: 'AI వాకింగ్ రాడార్ ప్రారంభమైంది. కెమెరాను ముందుకు ఉంచండి.',
+        es: 'Radar de visión IA activo. Apunte la cámara hacia el camino.',
+        fr: 'Radar de marche IA actif. Pointez la caméra vers l\'avant.',
+        de: 'KI-Laufradar aktiv. Richten Sie die Kamera nach vorne.'
+      };
+      const welcome = welcomeMap[selectedLanguage] || welcomeMap['en'];
+      setTimeout(() => {
+        speakText(welcome, selectedLanguage);
+      }, 350);
     } else {
       stopCamera();
     }
     return () => {
       stopCamera();
     };
-  }, [isOpen, startCamera, stopCamera]);
+  }, [isOpen, selectedLanguage, startCamera, stopCamera]);
 
-  // Announce obstacle with voice, tone, and haptic feedback (throttled)
-  const alertObstacle = useCallback((obs: DetectedObstacle) => {
+  // Announce obstacle with voice, tone, and haptic feedback
+  const alertObstacle = useCallback((obs: DetectedObstacle, force: boolean = false) => {
     const now = Date.now();
-    // 3.5s cooldown between consecutive voice alerts to avoid chatter
-    if (now - lastSpokenTimestampRef.current > 3500) {
+    // 2.8s cooldown between consecutive voice alerts to avoid excessive repetition
+    if (force || now - lastSpokenTimestampRef.current > 2800) {
       lastSpokenTimestampRef.current = now;
       playAlertSound();
       triggerHapticAlert();
@@ -145,7 +247,7 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
       ctx.strokeRect(left, top, width, height);
 
       // Semi-transparent danger fill
-      ctx.fillStyle = 'rgba(239, 68, 68, 0.18)';
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.22)';
       ctx.fillRect(left, top, width, height);
 
       // Label background pill
@@ -155,11 +257,11 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
 
       ctx.fillStyle = '#dc2626';
       ctx.shadowBlur = 0;
-      ctx.fillRect(left, Math.max(0, top - 22), textWidth + 14, 22);
+      ctx.fillRect(left, Math.max(0, top - 24), textWidth + 14, 24);
 
       // Label text
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(labelText, left + 7, Math.max(15, top - 6));
+      ctx.fillText(labelText, left + 7, Math.max(16, top - 7));
     });
   }, []);
 
@@ -181,13 +283,58 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
       }
     }
 
+    // Direct manual test button triggers
+    if (hintCategory) {
+      if (hintCategory === 'clear') {
+        setObstacles([]);
+        setLastWarning(null);
+        drawOverlay([]);
+        const clearMsg = selectedLanguage === 'ta'
+          ? 'பாதை தெளிவாக உள்ளது. பாதுகாப்பாக செல்லலாம்.'
+          : selectedLanguage === 'hi'
+          ? 'मार्ग साफ है। सुरक्षित चलें।'
+          : 'Path is clear. Safe to walk.';
+        speakText(clearMsg, selectedLanguage);
+        setIsScanning(false);
+        return;
+      }
+
+      const testBoxes: Record<string, { box: [number, number, number, number]; pos: 'left' | 'center' | 'right'; dist: number }> = {
+        construction: { box: [0.30, 0.45, 0.70, 0.85], pos: 'center', dist: 1.5 },
+        stairs: { box: [0.18, 0.48, 0.82, 0.88], pos: 'center', dist: 2.0 },
+        damaged_surface: { box: [0.40, 0.60, 0.65, 0.82], pos: 'center', dist: 1.2 },
+        blockage: { box: [0.10, 0.45, 0.45, 0.85], pos: 'left', dist: 1.8 }
+      };
+
+      const preset = testBoxes[hintCategory] || { box: [0.3, 0.45, 0.7, 0.85], pos: 'center', dist: 1.5 };
+      const warn = generateObstacleWarning(hintCategory, preset.pos, preset.dist, selectedLanguage);
+      const testObs: DetectedObstacle = {
+        label: hintCategory,
+        prompt: hintCategory,
+        confidence: 0.95,
+        position: preset.pos,
+        suggested_action: preset.pos === 'left' ? 'keep_right' : preset.pos === 'right' ? 'keep_left' : 'step_aside',
+        distance_approx_m: preset.dist,
+        box: preset.box,
+        warning: warn
+      };
+
+      setObstacles([testObs]);
+      setLastWarning(warn);
+      drawOverlay([testObs]);
+      alertObstacle(testObs, true);
+      setIsScanning(false);
+      return;
+    }
+
+    // 1. Try server-side OWLv2 inference
+    let serverSuccess = false;
     try {
       const res = await fetch('/api/vision/detect-obstacle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           image_base64: base64Image,
-          hint_category: hintCategory,
           language: selectedLanguage
         })
       });
@@ -195,6 +342,7 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
       if (res.ok) {
         const data = await res.json();
         if (data.status === 'ok') {
+          serverSuccess = true;
           setObstacles(data.obstacles || []);
           drawOverlay(data.obstacles || []);
 
@@ -208,13 +356,96 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
         }
       }
     } catch (e) {
-      console.warn('Vision detection fetch error:', e);
-    } finally {
-      setIsScanning(false);
+      console.warn('Backend vision detection unavailable, using client-side sensor:', e);
     }
+
+    // 2. Client-side Canvas Frame Analysis Fallback (Runs on device when offline/walking)
+    if (!serverSuccess && canvas && video && video.videoWidth > 0) {
+      try {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imgData.data;
+
+          let leftContrast = 0;
+          let centerContrast = 0;
+          let rightContrast = 0;
+          let samplesLeft = 0;
+          let samplesCenter = 0;
+          let samplesRight = 0;
+
+          const startY = Math.floor(canvas.height * 0.45);
+          const endY = Math.floor(canvas.height * 0.9);
+
+          for (let y = startY; y < endY; y += 4) {
+            for (let x = 20; x < canvas.width - 20; x += 4) {
+              const idx = (y * canvas.width + x) * 4;
+              const nextIdx = ((y + 2) * canvas.width + x) * 4;
+              const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+              const nextLum = 0.299 * data[nextIdx] + 0.587 * data[nextIdx + 1] + 0.114 * data[nextIdx + 2];
+              const diff = Math.abs(lum - nextLum);
+
+              if (x < canvas.width * 0.35) {
+                leftContrast += diff;
+                samplesLeft++;
+              } else if (x < canvas.width * 0.65) {
+                centerContrast += diff;
+                samplesCenter++;
+              } else {
+                rightContrast += diff;
+                samplesRight++;
+              }
+            }
+          }
+
+          const avgLeft = samplesLeft > 0 ? leftContrast / samplesLeft : 0;
+          const avgCenter = samplesCenter > 0 ? centerContrast / samplesCenter : 0;
+          const avgRight = samplesRight > 0 ? rightContrast / samplesRight : 0;
+          const maxGrad = Math.max(avgLeft, avgCenter, avgRight);
+
+          // If significant ground edge gradient or obstruction is detected
+          if (maxGrad > 42) {
+            let pos: 'left' | 'center' | 'right' = 'center';
+            let box: [number, number, number, number] = [0.28, 0.45, 0.72, 0.85];
+            if (maxGrad === avgLeft) {
+              pos = 'left';
+              box = [0.08, 0.45, 0.42, 0.85];
+            } else if (maxGrad === avgRight) {
+              pos = 'right';
+              box = [0.58, 0.45, 0.92, 0.85];
+            }
+
+            const warn = generateObstacleWarning('blockage', pos, 1.8, selectedLanguage);
+            const clientObs: DetectedObstacle = {
+              label: 'blockage',
+              prompt: 'physical obstacle on walking path',
+              confidence: 0.88,
+              position: pos,
+              suggested_action: pos === 'left' ? 'keep_right' : pos === 'right' ? 'keep_left' : 'step_aside',
+              distance_approx_m: 1.8,
+              box,
+              warning: warn
+            };
+
+            setObstacles([clientObs]);
+            setLastWarning(warn);
+            drawOverlay([clientObs]);
+            alertObstacle(clientObs);
+          } else {
+            setObstacles([]);
+            setLastWarning(null);
+            drawOverlay([]);
+          }
+        }
+      } catch (err) {
+        console.warn('Canvas pixel analysis error:', err);
+      }
+    }
+
+    setIsScanning(false);
   }, [selectedLanguage, drawOverlay, alertObstacle]);
 
-  // Periodic frame scanner loop
+  // Periodic frame scanner loop (every 1.2 seconds)
   useEffect(() => {
     if (!isOpen) return;
 

@@ -36,6 +36,9 @@ interface JourneySetupProps {
   isDestSelectMode: boolean;
   setIsDestSelectMode: (v: boolean) => void;
   onSelectDestination?: (coords: [number, number], name: string) => void;
+  autoStartBlindCamera?: boolean;
+  setAutoStartBlindCamera?: (v: boolean) => void;
+  onStartBlindNavigation?: () => void;
 }
 
 export const JourneySetup: React.FC<JourneySetupProps> = ({
@@ -65,7 +68,10 @@ export const JourneySetup: React.FC<JourneySetupProps> = ({
   destinationPoint,
   isDestSelectMode,
   setIsDestSelectMode,
-  onSelectDestination
+  onSelectDestination,
+  autoStartBlindCamera,
+  setAutoStartBlindCamera,
+  onStartBlindNavigation
 }) => {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -160,6 +166,7 @@ export const JourneySetup: React.FC<JourneySetupProps> = ({
         step_free_required: false
       });
     } else if (type === 'low_vision') {
+      if (setAutoStartBlindCamera) setAutoStartBlindCamera(true);
       setProfile({
         name: 'low_vision',
         exclude_stairs: false,
@@ -582,6 +589,30 @@ export const JourneySetup: React.FC<JourneySetupProps> = ({
         </div>
       </div>
 
+      {/* Blind Assistance / AI Obstacle Camera Mode Card */}
+      <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 p-3.5 rounded-xl space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-indigo-950">
+            <input
+              type="checkbox"
+              checked={autoStartBlindCamera ?? false}
+              onChange={(e) => setAutoStartBlindCamera?.(e.target.checked)}
+              className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+            />
+            <span className="flex items-center gap-1.5">
+              <Eye className="w-4 h-4 text-indigo-600" />
+              <span>Auto-activate AI Camera on Destination Set</span>
+            </span>
+          </label>
+          <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-200/90 text-indigo-900 px-2 py-0.5 rounded-full">
+            Blind Radar
+          </span>
+        </div>
+        <p className="text-[11px] text-indigo-700 leading-snug">
+          When you enter or pick a destination, your phone's camera turns on automatically to scan your walking path for obstacles and speaks voice warnings in real time.
+        </p>
+      </div>
+
       {/* Editable Constraints */}
       <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
         <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -676,26 +707,46 @@ export const JourneySetup: React.FC<JourneySetupProps> = ({
         </div>
       </div>
 
-      {/* Main Calculate Route Button */}
-      <button
-        type="button"
-        onClick={onCalculateRoute}
-        disabled={loading}
-        className="w-full min-h-[48px] bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold rounded-lg shadow transition-colors flex items-center justify-center gap-2 focus:outline-none focus:ring-4 focus:ring-blue-300"
-      >
-        {loading ? (
-          <span>Calculating Constrained Route...</span>
-        ) : (
-          <>
-            <Navigation className="w-5 h-5" />
-            <span>
-              {useRealTimeOrigin && userLocation
-                ? 'Plan Accessible Route from My GPS Location'
-                : 'Calculate Accessible Route'}
-            </span>
-          </>
-        )}
-      </button>
+      {/* Action Buttons */}
+      <div className="space-y-2.5">
+        <button
+          type="button"
+          onClick={onCalculateRoute}
+          disabled={loading}
+          className="w-full min-h-[48px] bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold rounded-lg shadow transition-colors flex items-center justify-center gap-2 focus:outline-none focus:ring-4 focus:ring-blue-300"
+        >
+          {loading ? (
+            <span>Calculating Constrained Route...</span>
+          ) : (
+            <>
+              <Navigation className="w-5 h-5" />
+              <span>
+                {useRealTimeOrigin && userLocation
+                  ? 'Plan Accessible Route from My GPS Location'
+                  : 'Calculate Accessible Route'}
+              </span>
+            </>
+          )}
+        </button>
+
+        {/* Dedicated 1-Click Blind Navigation & AI Camera Button */}
+        <button
+          type="button"
+          onClick={() => {
+            if (setAutoStartBlindCamera) setAutoStartBlindCamera(true);
+            if (onStartBlindNavigation) {
+              onStartBlindNavigation();
+            } else {
+              onCalculateRoute();
+            }
+          }}
+          disabled={loading}
+          className="w-full min-h-[48px] bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 active:from-indigo-800 active:to-purple-800 text-white font-extrabold rounded-lg shadow-lg flex items-center justify-center gap-2 transition-all transform hover:scale-[1.01] active:scale-[0.99] border border-indigo-400/40 focus:outline-none focus:ring-4 focus:ring-purple-300"
+        >
+          <Eye className="w-5 h-5 text-indigo-200 animate-pulse" />
+          <span>🦯 Start Blind Walk & AI Camera (Voice Alerts)</span>
+        </button>
+      </div>
     </div>
   );
 };

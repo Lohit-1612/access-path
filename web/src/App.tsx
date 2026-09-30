@@ -17,7 +17,7 @@ import {
   Navigation, Camera, ShieldCheck, Sparkles, Activity,
   Radio, CheckCircle2, AlertCircle, Compass, LocateFixed, Eye, Globe
 } from 'lucide-react';
-import { SUPPORTED_LANGUAGES } from './utils/language';
+import { SUPPORTED_LANGUAGES, speakText } from './utils/language';
 
 export function App() {
   // Navigation tabs: 'journey' | 'report' | 'detail' | 'reviews'
@@ -32,6 +32,7 @@ export function App() {
     }
   });
   const [isBlindCameraOpen, setIsBlindCameraOpen] = useState<boolean>(false);
+  const [autoStartBlindCamera, setAutoStartBlindCamera] = useState<boolean>(true);
 
   const handleLanguageChange = (lang: string) => {
     setSelectedLanguage(lang);
@@ -263,8 +264,22 @@ export function App() {
       setRoute(r);
       if (r.graph_revision) setGraphRevision(r.graph_revision);
       setLiveAnnouncement(`Accessible route to ${name} ready: ${r.total_distance_m}m.`);
+
+      // Automatically activate AI Camera for blind pedestrian when destination is chosen
+      if (autoStartBlindCamera || profile.name === 'low_vision') {
+        setIsNavigating(true);
+        setIsBlindCameraOpen(true);
+        const announceMsg = selectedLanguage === 'ta'
+          ? `${name} இலக்கு அமைக்கப்பட்டது. ஏஐ கேமரா இயங்குகிறது. பாதையை ஸ்கேன் செய்கிறது.`
+          : selectedLanguage === 'hi'
+          ? `${name} गंतव्य सेट हो गया। एआई कैमरा चालू है। मार्ग स्कैन हो रहा है।`
+          : selectedLanguage === 'te'
+          ? `${name} గమ్యం సెట్ చేయబడింది. AI కెమెరా ఆన్ చేయబడింది.`
+          : `Destination set to ${name}. AI Obstacle Camera activated. Scanning walking path.`;
+        setTimeout(() => speakText(announceMsg, selectedLanguage), 350);
+      }
     }).catch(console.error).finally(() => setLoadingRoute(false));
-  }, [useRealTimeOrigin, userLocation, originPlaceId, profile, strictness]);
+  }, [useRealTimeOrigin, userLocation, originPlaceId, profile, strictness, autoStartBlindCamera, selectedLanguage]);
 
   // Real-Time GPS tracking watcher while navigating (low-power / network friendly)
   useEffect(() => {
@@ -336,6 +351,22 @@ export function App() {
         setLoadingRoute(false);
       });
   }, [useRealTimeOrigin, userLocation, originPlaceId, destMode, destinationPoint, customDestText, destPlaceId, profile, strictness]);
+
+  // 1-Click Blind Navigation and AI Camera starter
+  const handleStartBlindNavigation = useCallback(() => {
+    setAutoStartBlindCamera(true);
+    setIsNavigating(true);
+    setIsBlindCameraOpen(true);
+    if (!route) {
+      handleCalculateRoute();
+    }
+    const announceMsg = selectedLanguage === 'ta'
+      ? 'பார்வையற்றோருக்கான ஏஐ கேமரா வழிசெலுத்தல் தொடங்குகிறது. கேமராவை முன்னோக்கி வைக்கவும்.'
+      : selectedLanguage === 'hi'
+      ? 'नेत्रहीन सहायता: एआई कैमरा नेविगेशन शुरू हो रहा है। कैमरे को आगे रखें।'
+      : 'Blind navigation started. AI Camera active. Point camera forward along your path.';
+    setTimeout(() => speakText(announceMsg, selectedLanguage), 300);
+  }, [route, handleCalculateRoute, selectedLanguage]);
 
   // Initial route calculation once places are loaded
   useEffect(() => {
@@ -585,6 +616,9 @@ export function App() {
                     isDestSelectMode={isDestSelectMode}
                     setIsDestSelectMode={setIsDestSelectMode}
                     onSelectDestination={handleSelectSearchDestination}
+                    autoStartBlindCamera={autoStartBlindCamera}
+                    setAutoStartBlindCamera={setAutoStartBlindCamera}
+                    onStartBlindNavigation={handleStartBlindNavigation}
                   />
                 </div>
               )}
@@ -621,6 +655,14 @@ export function App() {
                       setRoute(r);
                       if (r.graph_revision) setGraphRevision(r.graph_revision);
                       setLiveAnnouncement(`Accessible route planned to destination pin.`);
+                      if (autoStartBlindCamera || profile.name === 'low_vision') {
+                        setIsNavigating(true);
+                        setIsBlindCameraOpen(true);
+                        const msg = selectedLanguage === 'ta'
+                          ? 'வரைபடத்தில் இலக்கு அமைக்கப்பட்டது. ஏஐ கேமரா இயங்குகிறது.'
+                          : 'Destination set on map. AI Obstacle Camera activated. Scanning walking path.';
+                        setTimeout(() => speakText(msg, selectedLanguage), 350);
+                      }
                     }).catch(console.error);
                   }}
                   isDestSelectMode={isDestSelectMode}
