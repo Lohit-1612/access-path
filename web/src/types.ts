@@ -54,6 +54,9 @@ export interface RouteStep {
   width_m?: number;
   roughness: number;
   warning?: string;
+  source?: string;
+  checked_at?: string;
+  is_verified?: boolean;
 }
 
 export interface RouteResponse {
@@ -75,6 +78,15 @@ export interface RouteResponse {
   };
   steps: RouteStep[];
   evidence_coverage: number;
+  evidence_breakdown?: {
+    verified_length_m: number;
+    total_length_m: number;
+    verified_segments: number;
+    total_segments: number;
+    surveyed_coverage_pct: number;
+    data_sources: string[];
+  };
+  turn_count?: number;
   warnings: string[];
   reason_codes: string[];
   explanation?: string;

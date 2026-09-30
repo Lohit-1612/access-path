@@ -23,6 +23,10 @@ wheels/
 .pytest_cache/
 accesspath.db
 accesspath.db-journal
+accesspath_test.db
+.env
+.env.local
+.env.*.local
 uploads/
 *.log
 

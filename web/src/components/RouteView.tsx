@@ -23,6 +23,7 @@ export const RouteView: React.FC<RouteViewProps> = ({
   onStartNavigation
 }) => {
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [showEvidence, setShowEvidence] = useState(false);
 
   if (!route) {
     return (
@@ -33,6 +34,13 @@ export const RouteView: React.FC<RouteViewProps> = ({
       </div>
     );
   }
+
+  const turnCount = route.turn_count !== undefined
+    ? route.turn_count
+    : route.steps.filter(s => s.instruction.toLowerCase().includes('turn')).length;
+
+  const isDetour = route.reason_codes.includes('BLOCKED_EDGE_AVOIDED') || route.reason_codes.includes('UNVERIFIED_BLOCKAGE_AVOIDED');
+  const isUnverifiedDetour = route.reason_codes.includes('UNVERIFIED_BLOCKAGE_AVOIDED');
 
   // Handle Voice Synthesis (Page 10: user initiated start & stop control)
   const handleToggleSpeech = () => {
@@ -83,6 +91,13 @@ export const RouteView: React.FC<RouteViewProps> = ({
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-300">
               {profile.name}
             </span>
+            {isDetour && (
+              <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                isUnverifiedDetour ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-rose-100 text-rose-900 border border-rose-300'
+              }`}>
+                {isUnverifiedDetour ? 'Provisional Detour' : 'Active Detour'}
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
             Pedestrian Network Revision #{route.graph_revision}
@@ -146,7 +161,7 @@ export const RouteView: React.FC<RouteViewProps> = ({
               {route.reason_codes.includes('BLOCKED_EDGE_AVOIDED') && (
                 <div className="mt-3 pt-3 border-t border-rose-200 flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs text-rose-800 font-medium">
-                    Verified barriers from testing are blocking step-free pathways.
+                    Verified barriers are blocking step-free pathways.
                   </span>
                   <button
                     type="button"
@@ -168,26 +183,38 @@ export const RouteView: React.FC<RouteViewProps> = ({
         <>
           {/* Detour or Standard Explanation Banner */}
           <div className={`p-4 rounded-lg border flex items-start gap-3 ${
-            route.reason_codes.includes('BLOCKED_EDGE_AVOIDED')
-              ? 'bg-amber-50 border-amber-300 text-amber-900'
+            isDetour
+              ? (isUnverifiedDetour ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-amber-50 border-amber-300 text-amber-900')
               : 'bg-emerald-50 border-emerald-300 text-emerald-900'
           }`}>
-            {route.reason_codes.includes('BLOCKED_EDGE_AVOIDED') ? (
+            {isDetour ? (
               <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
             ) : (
               <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
             )}
             <div className="flex-1">
               <h3 className="font-bold text-base">
-                {route.reason_codes.includes('BLOCKED_EDGE_AVOIDED')
+                {isUnverifiedDetour
+                  ? 'Provisional Barrier Detour (Pending Verification)'
+                  : isDetour
                   ? 'Dynamic Barrier Avoidance Active'
-                  : 'Surveyed Accessible Path'}
+                  : 'Accessible Surveyed Path'}
               </h3>
               <p className="text-sm mt-0.5">{route.explanation}</p>
+              {route.warnings.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-amber-200/60 text-xs space-y-1">
+                  {route.warnings.map((w, idx) => (
+                    <p key={idx} className="flex items-center gap-1.5 text-amber-800">
+                      <Info className="w-3.5 h-3.5 shrink-0" />
+                      <span>{w}</span>
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Metrics bar: Distance, Evidence Coverage */}
+          {/* Metrics bar: Distance, Turn Count, Evidence Coverage, Stairs */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-lg border border-slate-200">
             <div>
               <span className="text-xs font-semibold text-slate-500 uppercase">Actual Distance</span>
@@ -195,17 +222,29 @@ export const RouteView: React.FC<RouteViewProps> = ({
             </div>
 
             <div>
-              <span className="text-xs font-semibold text-slate-500 uppercase">Turn Count</span>
-              <p className="text-xl font-extrabold text-slate-900">{route.steps.length} segments</p>
+              <span className="text-xs font-semibold text-slate-500 uppercase">Turns</span>
+              <p className="text-xl font-extrabold text-slate-900">
+                {turnCount} <span className="text-xs font-normal text-slate-500">({route.steps.length} segments)</span>
+              </p>
             </div>
 
             <div>
               <span className="text-xs font-semibold text-slate-500 uppercase">Evidence Coverage</span>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <ShieldCheck className="w-5 h-5 text-emerald-600" />
-                <span className="text-base font-extrabold text-emerald-700">
-                  {Math.round(route.evidence_coverage * 100)}% Verified
-                </span>
+              <div className="flex items-center justify-between gap-1 mt-0.5">
+                <div className="flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="text-base font-extrabold text-emerald-700">
+                    {Math.round(route.evidence_coverage * 100)}%
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowEvidence(!showEvidence)}
+                  className="text-xs font-bold text-blue-700 hover:text-blue-900 underline"
+                  title="View measured pathway attributes and survey dates"
+                >
+                  {showEvidence ? 'Hide' : 'Evidence'}
+                </button>
               </div>
             </div>
 
@@ -216,6 +255,81 @@ export const RouteView: React.FC<RouteViewProps> = ({
               </p>
             </div>
           </div>
+
+          {/* Collapsible Genuine Evidence Panel */}
+          {showEvidence && (
+            <div className="bg-slate-50 border border-slate-300 rounded-xl p-4 space-y-3 animate-fadeIn">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                  <h4 className="font-bold text-sm text-slate-900">
+                    Route Evidence & Verified Attributes Breakdown
+                  </h4>
+                </div>
+                <span className="text-xs font-mono font-semibold text-slate-500">
+                  {route.evidence_breakdown
+                    ? `${route.evidence_breakdown.verified_segments} of ${route.evidence_breakdown.total_segments} segments verified (${route.evidence_breakdown.verified_length_m}m of ${route.evidence_breakdown.total_length_m}m)`
+                    : `${Math.round(route.evidence_coverage * 100)}% Verified`}
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-200 text-slate-700 uppercase font-bold text-[10px]">
+                    <tr>
+                      <th className="p-2">Segment</th>
+                      <th className="p-2">Length</th>
+                      <th className="p-2">Surface</th>
+                      <th className="p-2">Slope (%)</th>
+                      <th className="p-2">Width (m)</th>
+                      <th className="p-2">Stairs</th>
+                      <th className="p-2">Source</th>
+                      <th className="p-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white">
+                    {route.steps.map((s, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50">
+                        <td className="p-2 font-medium text-slate-800">{s.name}</td>
+                        <td className="p-2 font-mono">{s.distance_m}m</td>
+                        <td className="p-2 capitalize">{s.surface || 'Unknown'}</td>
+                        <td className="p-2 font-mono">
+                          {s.slope_pct !== undefined && s.slope_pct !== null ? `${s.slope_pct}%` : <span className="text-slate-400">Unmeasured</span>}
+                        </td>
+                        <td className="p-2 font-mono">
+                          {s.width_m ? `${s.width_m}m` : <span className="text-slate-400">Unknown</span>}
+                        </td>
+                        <td className="p-2">
+                          {s.stairs ? <span className="text-amber-700 font-bold">Yes (Stairs)</span> : <span className="text-emerald-700 font-semibold">No (Step-free)</span>}
+                        </td>
+                        <td className="p-2">
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 uppercase">
+                            {s.source || 'survey'}
+                          </span>
+                        </td>
+                        <td className="p-2">
+                          {s.is_verified !== false ? (
+                            <span className="text-emerald-700 font-bold flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              <span>Verified</span>
+                            </span>
+                          ) : (
+                            <span className="text-amber-700 font-bold flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3 text-amber-600" />
+                              <span>Unverified</span>
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[11px] text-slate-500 italic">
+                * Unknown parameters are reported honestly without assuming default accessibility values.
+              </p>
+            </div>
+          )}
 
           {/* Turn-by-Turn Ordered Accessible Text View (WCAG / Low Vision requirement) */}
           <div>

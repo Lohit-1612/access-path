@@ -230,21 +230,38 @@ export const MapView: React.FC<MapViewProps> = ({
           ${iconSymbol} ${b.category.replace('_', ' ')}
         </div>
         <div style="font-size: 11px; color: #64748b; margin-bottom: 6px;">
-          Status: <strong>${b.status}</strong> • ${b.freshness_hours}h ago
+          Status: <strong style="color:${markerColor};">${isActive ? 'Verified Active Barrier' : isPending ? 'Pending Inspection (Unverified)' : b.status}</strong> • ${b.freshness_hours}h ago
         </div>
+        ${isPending ? '<div style="background:#fef3c7; color:#92400e; padding:4px 6px; border-radius:4px; font-size:11px; font-weight:600; margin-bottom:6px;">⚠️ Unverified community report (Provisional avoidance active)</div>' : ''}
         ${b.is_stale ? '<div style="color:#dc2626; font-weight:bold; font-size:11px; margin-bottom:4px;">⚠️ Stale Evidence (>24h)</div>' : ''}
         ${b.notes ? `<div style="font-size: 12px; color: #334155; margin-bottom: 8px; background: #f8fafc; padding: 6px; border-radius: 6px; border: 1px solid #e2e8f0;">${b.notes}</div>` : ''}
         ${b.image_url ? `<img src="${b.image_url}" alt="Barrier" style="width: 100%; border-radius: 6px; margin-bottom: 8px; max-height: 120px; object-fit: cover;"/>` : ''}
-        <button id="del-barrier-btn-${b.id}" style="width: 100%; padding: 6px 10px; background-color: #ef4444; color: white; border: none; border-radius: 6px; font-weight: 700; font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: background 0.2s;">
-          <span>🗑️ Delete / Clear Barrier</span>
-        </button>
+        <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px;">
+          <button id="clear-report-btn-${b.id}" style="width: 100%; padding: 6px 10px; background-color: #2563eb; color: white; border: none; border-radius: 6px; font-weight: 700; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: background 0.2s;">
+            <span>📢 Report Pathway Cleared</span>
+          </button>
+          <button id="del-barrier-btn-${b.id}" style="width: 100%; padding: 5px 8px; background-color: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: 600; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; transition: background 0.2s;">
+            <span>✓ Confirm Resolution (Verifier)</span>
+          </button>
+        </div>
       `;
+
+      const clearBtn = popupDiv.querySelector(`#clear-report-btn-${b.id}`);
+      if (clearBtn) {
+        clearBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const { reportBarrierCleared } = await import('../api');
+          await reportBarrierCleared(b.id, 'Reported cleared by citizen on map', 'reporter');
+          alert('Clearance reported! A campus verifier will inspect and confirm final restoration.');
+          map.closePopup();
+        });
+      }
 
       const delBtn = popupDiv.querySelector(`#del-barrier-btn-${b.id}`);
       if (delBtn && onDeleteBarrier) {
         delBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          if (window.confirm(`Delete and clear this ${b.category.replace('_', ' ')} barrier? The pathway will immediately become accessible for all users.`)) {
+          if (window.confirm(`Verify and confirm resolution of this ${b.category.replace('_', ' ')} barrier? The pathway will immediately become accessible for all users.`)) {
             onDeleteBarrier(b.id);
             map.closePopup();
           }

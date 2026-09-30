@@ -31,6 +31,9 @@ class RouteStep(BaseModel):
     width_m: Optional[float] = None
     roughness: float
     warning: Optional[str] = None
+    source: Optional[str] = "survey"
+    checked_at: Optional[str] = None
+    is_verified: bool = True
 
 class RouteResponse(BaseModel):
     status: str  # ok, no_route, out_of_coverage
@@ -41,6 +44,8 @@ class RouteResponse(BaseModel):
     geometry: Dict[str, Any]  # GeoJSON Feature or FeatureCollection
     steps: List[RouteStep]
     evidence_coverage: float  # proportion 0.0 - 1.0 of route attributes checked and current
+    evidence_breakdown: Optional[Dict[str, Any]] = None
+    turn_count: Optional[int] = 0
     warnings: List[str]
     reason_codes: List[str]
     explanation: Optional[str] = None
@@ -144,3 +149,18 @@ class EventItem(BaseModel):
     event_type: str
     payload: Dict[str, Any]
     created_at: datetime
+
+class MarkBarrierRequest(BaseModel):
+    category: str = "blockage"
+    lat: float
+    lon: float
+    notes: Optional[str] = None
+    reporter_name: Optional[str] = "User"
+    affected_edge_ids: Optional[List[str]] = None
+    extent: Optional[str] = "complete"
+    role: Optional[str] = "reporter"  # "reporter" -> pending, "verifier" -> verified_active
+
+class ReportClearedRequest(BaseModel):
+    reporter_name: Optional[str] = "User"
+    notes: Optional[str] = "Cleared / path restored"
+    role: Optional[str] = "reporter"  # "verifier" resolves directly, "reporter" flags pending clearance

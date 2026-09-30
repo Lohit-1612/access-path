@@ -283,13 +283,19 @@ class Repository:
     def mark_active_barrier(self, category: str, lat: float, lon: float,
                             notes: Optional[str] = None, reporter_name: str = "User",
                             affected_edge_ids: Optional[List[str]] = None,
-                            extent: str = "complete") -> Dict[str, Any]:
+                            extent: str = "complete",
+                            role: str = "reporter",
+                            status: Optional[str] = None) -> Dict[str, Any]:
         """
-        Directly mark and activate a barrier on the shared map so that all other users' routes immediately avoid it.
+        Mark a barrier on the shared map.
+        User submissions enter 'pending' (unverified) with provisional route avoidance.
+        Verifier submissions enter 'verified_active'.
         """
         report_id = f"rep-{uuid.uuid4()}"
         now = utc_now_iso()
         obs = now
+
+        final_status = status if status else ("verified_active" if role == "verifier" else "pending")
 
         edge_ids = list(affected_edge_ids) if affected_edge_ids else []
         if not edge_ids:
@@ -311,11 +317,15 @@ class Repository:
                     if opp and opp not in edge_ids:
                         edge_ids.append(opp)
 
+        actor_id = "usr-verifier-1" if role == "verifier" else "usr-reporter-1"
+        review_action = "verify" if final_status == "verified_active" else "submit"
+        review_reason = "Marked active barrier" if final_status == "verified_active" else "Reported by user (pending verification)"
+
         with get_db() as conn:
             conn.execute("""
                 INSERT INTO reports (id, reporter_id, category, status, lat, lon, accuracy_m, observed_at, version, notes, created_at, updated_at)
-                VALUES (?, 'usr-reporter-1', ?, 'verified_active', ?, ?, 3.0, ?, 1, ?, ?, ?)
-            """, (report_id, category, lat, lon, obs, notes, now, now))
+                VALUES (?, ?, ?, ?, ?, ?, 3.0, ?, 1, ?, ?, ?)
+            """, (report_id, actor_id, category, final_status, lat, lon, obs, notes, now, now))
 
             for eid in edge_ids:
                 conn.execute("""
@@ -326,12 +336,12 @@ class Repository:
             audit_id = f"rev-{uuid.uuid4()}"
             conn.execute("""
                 INSERT INTO reviews (id, report_id, actor_id, actor_name, action, reason, old_state, new_state, timestamp)
-                VALUES (?, ?, 'usr-verifier-1', ?, 'verify', 'Marked active barrier', 'none', 'verified_active', ?)
-            """, (audit_id, report_id, reporter_name, now))
+                VALUES (?, ?, ?, ?, ?, ?, 'none', ?, ?)
+            """, (audit_id, report_id, actor_id, reporter_name, review_action, review_reason, final_status, now))
 
         new_rev = self.increment_graph_revision(
             affected_edge_ids=edge_ids,
-            event_type="barrier_verified_active",
+            event_type=f"barrier_{final_status}",
             payload={
                 "report_id": report_id,
                 "category": category,
@@ -339,9 +349,13 @@ class Repository:
                 "lon": lon,
                 "notes": notes,
                 "affected_edge_ids": edge_ids,
-                "status": "verified_active"
+                "status": final_status
             }
         )
+
+        msg = (f"Barrier '{category}' marked as verified active. Routes will avoid this obstacle."
+               if final_status == "verified_active" else
+               f"Barrier '{category}' submitted as pending (unverified). Provisional avoidance active for strict routes; queued for verifier review.")
 
         return {
             "status": "ok",
@@ -352,7 +366,61 @@ class Repository:
             "notes": notes,
             "affected_edge_ids": edge_ids,
             "graph_revision": new_rev,
-            "message": f"Barrier '{category}' successfully marked. Pedestrian routing will now avoid this obstacle."
+            "barrier_status": final_status,
+            "message": msg
+        }
+
+    def report_barrier_cleared(self, report_id: str, reporter_name: str = "User",
+                               notes: str = "Cleared / path restored", role: str = "reporter") -> Dict[str, Any]:
+        """
+        Report that an existing barrier has been removed/cleared.
+        If reporter is a verifier, resolution is confirmed immediately.
+        If reporter is a citizen, records a clearance notification for verifiers to inspect and confirm.
+        """
+        if role == "verifier":
+            return self.delete_barrier(report_id=report_id, actor_name=reporter_name, reason=notes)
+
+        now = utc_now_iso()
+        with get_db() as conn:
+            row = conn.execute("SELECT id, status, version, notes FROM reports WHERE id = ?", (report_id,)).fetchone()
+            if not row:
+                raise ValueError(f"Barrier report {report_id} not found")
+
+            current_status = row["status"]
+            current_ver = row["version"]
+            new_ver = current_ver + 1
+            updated_notes = f"{row['notes'] or ''} [Clearance Reported by {reporter_name}: {notes}]".strip()
+
+            conn.execute("""
+                UPDATE reports SET version = ?, notes = ?, updated_at = ? WHERE id = ?
+            """, (new_ver, updated_notes, now, report_id))
+
+            audit_id = f"rev-{uuid.uuid4()}"
+            conn.execute("""
+                INSERT INTO reviews (id, report_id, actor_id, actor_name, action, reason, old_state, new_state, timestamp)
+                VALUES (?, ?, 'usr-reporter-1', ?, 'clearance_reported', ?, ?, ?, ?)
+            """, (audit_id, report_id, reporter_name, notes, current_status, current_status, now))
+
+            e_rows = conn.execute("SELECT edge_id FROM report_edges WHERE report_id = ?", (report_id,)).fetchall()
+            affected_edge_ids = [e["edge_id"] for e in e_rows]
+
+        new_rev = self.increment_graph_revision(
+            affected_edge_ids=affected_edge_ids,
+            event_type="barrier_clearance_reported",
+            payload={
+                "report_id": report_id,
+                "action": "clearance_reported",
+                "reporter_name": reporter_name,
+                "notes": notes,
+                "affected_edge_ids": affected_edge_ids
+            }
+        )
+
+        return {
+            "status": "ok",
+            "report_id": report_id,
+            "graph_revision": new_rev,
+            "message": "Clearance reported. A campus verifier will inspect and confirm final pathway restoration."
         }
 
     def delete_barrier(self, report_id: str, actor_name: str = "User", reason: str = "Cleared / deleted by user") -> Dict[str, Any]:
@@ -399,7 +467,7 @@ class Repository:
             "status": "ok",
             "report_id": report_id,
             "graph_revision": new_rev,
-            "message": "Barrier successfully deleted/cleared. Pathway is now restored and accessible for all users."
+            "message": "Barrier successfully resolved and cleared. Pathway is now restored and accessible for all users."
         }
 
     def list_barriers(self, status_filter: Optional[str] = None, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:

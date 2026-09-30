@@ -112,3 +112,68 @@ def test_both_routes_blocked_does_not_quietly_reintroduce_stairs():
     assert route.status == "no_route"
     assert "STAIRS_EXCLUDED" in route.reason_codes
     assert "BLOCKED_EDGE_AVOIDED" in route.reason_codes
+
+def test_full_hackathon_demo_flow():
+    """
+    Complete hackathon demonstration flow:
+    Detect barrier -> submit report -> verify information -> update affected routes -> communicate changes -> resolve barrier.
+    """
+    profile = MobilityProfile(name="wheelchair", exclude_stairs=True, max_slope_pct=8.0)
+
+    # 1. Initial State: Route B is optimal step-free path (650m)
+    r_initial = routing_engine.calculate_route("n_gate", "n_lib_entrance", profile)
+    assert r_initial.status == "ok"
+    assert r_initial.total_distance_m == 650.0
+    assert r_initial.evidence_coverage > 0.0
+    assert r_initial.turn_count >= 1
+    assert r_initial.evidence_breakdown["verified_segments"] > 0
+
+    # 2. Citizen detects barrier & submits report -> enters 'pending'
+    rep_id = repo.create_draft_report("construction", 13.08388, 80.27173, notes="Excavator digging trench across East walkway")
+    patched = repo.patch_report_and_submit(
+        rep_id, "construction",
+        ["e_east_blocked_segment_fwd", "e_east_blocked_segment_rev"],
+        extent="complete", direction="both",
+        notes="Pathway completely impassable for wheelchairs",
+        expected_version=1
+    )
+    assert patched["status"] == "pending"
+
+    # 3. Verifier reviews information in queue & verifies it
+    rev = repo.add_review(
+        rep_id, "verify",
+        reason="Field inspection confirmed deep trench across East Footpath Tree Walkway",
+        expected_version=2,
+        actor_name="Dr. Sarah Miller (Campus Verifier)"
+    )
+    assert rev["new_state"] == "verified_active"
+    assert rev["graph_revision"] >= 2
+
+    # 4. Route recalculates dynamically to Route C (720m, +70m detour)
+    r_detour = routing_engine.calculate_route("n_gate", "n_lib_entrance", profile)
+    assert r_detour.status == "ok"
+    assert r_detour.total_distance_m == 720.0
+    assert "BLOCKED_EDGE_AVOIDED" in r_detour.reason_codes
+    assert "East Footpath Tree Walkway" in r_detour.explanation
+    assert "720 m" in r_detour.explanation
+    assert "e_east_blocked_segment_fwd" not in r_detour.edge_ids
+
+    # 5. Citizen reports barrier cleared
+    clear_info = repo.report_barrier_cleared(rep_id, reporter_name="Citizen User", notes="Trench filled and paved")
+    assert clear_info["status"] == "ok"
+
+    # 6. Verifier inspects and confirms resolution -> status 'resolved'
+    res_rev = repo.add_review(
+        rep_id, "resolve",
+        reason="Facilities completed repaving; pathway fully certified accessible",
+        expected_version=4,  # version was bumped by clearance report
+        actor_name="Dr. Sarah Miller (Campus Verifier)"
+    )
+    assert res_rev["new_state"] == "resolved"
+
+    # 7. Route automatically restores to Route B (650m)
+    r_restored = routing_engine.calculate_route("n_gate", "n_lib_entrance", profile)
+    assert r_restored.status == "ok"
+    assert r_restored.total_distance_m == 650.0
+    assert "BLOCKED_EDGE_AVOIDED" not in r_restored.reason_codes
+

@@ -190,42 +190,112 @@ function extractTargetStreet(instruction: string): string {
   return match ? match[1].trim() : '';
 }
 
-// Speak turn or alert using SpeechSynthesis
-export function speakText(text: string, langCode: string = 'en', onEnd?: () => void) {
-  if (!('speechSynthesis' in window)) return;
+// Keep active utterance in memory to prevent browser garbage collection mid-speech
+let currentUtterance: SpeechSynthesisUtterance | null = null;
+let sharedAudioCtx: AudioContext | null = null;
+
+// Preload voices
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  window.speechSynthesis.onvoiceschanged = () => {
+    window.speechSynthesis.getVoices();
+  };
+}
+
+// Global user activation un-locker for mobile audio/speech policies
+export function unlockAudioAndSpeech(): void {
+  if (typeof window === 'undefined') return;
+
+  // 1. Unlock Web Audio
   try {
-    window.speechSynthesis.cancel();
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioContextClass) {
+      if (!sharedAudioCtx) {
+        sharedAudioCtx = new AudioContextClass();
+      }
+      if (sharedAudioCtx.state === 'suspended') {
+        sharedAudioCtx.resume().catch(console.warn);
+      }
+    }
+  } catch {}
+
+  // 2. Unlock SpeechSynthesis with zero-volume ping
+  try {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.resume();
+      const silentPing = new SpeechSynthesisUtterance(' ');
+      silentPing.volume = 0.01;
+      silentPing.rate = 2.0;
+      window.speechSynthesis.speak(silentPing);
+    }
+  } catch {}
+}
+
+// Speak turn or alert using SpeechSynthesis with robust mobile error handling
+export function speakText(text: string, langCode: string = 'en', onEnd?: () => void) {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  if (!text || !text.trim()) return;
+
+  try {
+    // Unfreeze speech synthesis engine if stuck
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+    if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+    }
+
     const utterance = new SpeechSynthesisUtterance(text);
+    currentUtterance = utterance; // Prevent garbage collection mid-speech
+
     const langObj = SUPPORTED_LANGUAGES.find((l) => l.code === langCode) || SUPPORTED_LANGUAGES[0];
     utterance.lang = langObj.bcp47;
-    utterance.rate = 0.95;
+    utterance.rate = 1.0;
     utterance.pitch = 1.0;
+    utterance.volume = 1.0;
 
     // Pick best matching voice
     const voices = window.speechSynthesis.getVoices();
-    const matchingVoice = voices.find((v) =>
-      v.lang.toLowerCase().replace('_', '-').startsWith(langObj.bcp47.toLowerCase().split('-')[0])
-    );
-    if (matchingVoice) {
-      utterance.voice = matchingVoice;
+    if (voices.length > 0) {
+      const targetPrefix = langObj.bcp47.toLowerCase().split('-')[0];
+      const matchingVoice = voices.find((v) =>
+        v.lang.toLowerCase().replace('_', '-').startsWith(targetPrefix)
+      ) || voices.find((v) => v.default) || voices[0];
+      if (matchingVoice) {
+        utterance.voice = matchingVoice;
+      }
     }
 
-    if (onEnd) {
-      utterance.onend = onEnd;
-    }
+    utterance.onend = () => {
+      currentUtterance = null;
+      if (onEnd) onEnd();
+    };
+
+    utterance.onerror = (event) => {
+      console.warn('SpeechSynthesis error:', event.error);
+      currentUtterance = null;
+    };
 
     window.speechSynthesis.speak(utterance);
   } catch (e) {
-    console.warn('Speech synthesis error:', e);
+    console.warn('Speech synthesis call error:', e);
   }
 }
 
 // Play audio alert tone for obstacle detection (Web Audio API Synthesizer)
 export function playAlertSound() {
+  if (typeof window === 'undefined') return;
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContextClass) return;
-    const ctx = new AudioContextClass();
+    if (!sharedAudioCtx) {
+      sharedAudioCtx = new AudioContextClass();
+    }
+    const ctx = sharedAudioCtx;
+
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(console.warn);
+    }
+
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
@@ -249,7 +319,7 @@ export function playAlertSound() {
 
 // Trigger haptic vibration for blind navigation
 export function triggerHapticAlert() {
-  if ('vibrate' in navigator) {
+  if (typeof window !== 'undefined' && 'vibrate' in navigator) {
     try {
       navigator.vibrate([200, 100, 200, 100, 300]);
     } catch (e) {

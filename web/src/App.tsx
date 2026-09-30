@@ -17,7 +17,7 @@ import {
   Navigation, Camera, ShieldCheck, Sparkles, Activity,
   Radio, CheckCircle2, AlertCircle, Compass, LocateFixed, Eye, Globe
 } from 'lucide-react';
-import { SUPPORTED_LANGUAGES, speakText } from './utils/language';
+import { SUPPORTED_LANGUAGES, speakText, unlockAudioAndSpeech } from './utils/language';
 
 export function App() {
   // Navigation tabs: 'journey' | 'report' | 'detail' | 'reviews'
@@ -32,7 +32,7 @@ export function App() {
     }
   });
   const [isBlindCameraOpen, setIsBlindCameraOpen] = useState<boolean>(false);
-  const [autoStartBlindCamera, setAutoStartBlindCamera] = useState<boolean>(true);
+  const [autoStartBlindCamera, setAutoStartBlindCamera] = useState<boolean>(false);
 
   const handleLanguageChange = (lang: string) => {
     setSelectedLanguage(lang);
@@ -115,7 +115,6 @@ export function App() {
   const applyLocationFix = useCallback((coords: [number, number], accuracy: number, sourceMsg: string) => {
     setUserLocation(coords);
     setUserLocationAccuracy(accuracy);
-    setUseRealTimeOrigin(true);
     setReportPin(coords);
     setIsLocating(false);
 
@@ -129,35 +128,13 @@ export function App() {
       setUserStreetName(street);
     }).catch(console.warn);
 
-    // Automatically anchor the accessible pedestrian network around user's position
-    relocateCampusGraph(coords[0], coords[1]).then((res) => {
-      loadData();
-      if (res && res.origin_name) {
-        setUserStreetName(res.origin_name);
-      }
-      setLiveAnnouncement(
-        `${sourceMsg}: ${coords[0].toFixed(4)}, ${coords[1].toFixed(4)}. Pedestrian network centered and journey planned!`
-      );
-      // Automatically start planning accessible journey from user's position
-      const targetDest: any = {};
-      if (destMode === 'map_pin' && destinationPoint) {
-        targetDest.destinationPoint = destinationPoint;
-      } else if (destMode === 'custom_text' && customDestText.trim()) {
-        targetDest.destPlaceId = customDestText.trim();
-      } else {
-        targetDest.destPlaceId = destPlaceId || 'place_main_library';
-      }
-      calculateRouteFlexible({
-        originPoint: coords,
-        ...targetDest,
-        profile,
-        strictness
-      }).then((r) => {
-        setRoute(r);
-        if (r.graph_revision) setGraphRevision(r.graph_revision);
-      }).catch(console.error);
-    }).catch(console.error);
-  }, [loadData, destMode, destinationPoint, customDestText, destPlaceId, profile, strictness]);
+    const accRound = Math.round(accuracy);
+    if (accRound > 30) {
+      setLiveAnnouncement(`Location acquired (±${accRound}m). Coarse Wi-Fi/network positioning detected. Outdoors recommended for high-accuracy GPS.`);
+    } else {
+      setLiveAnnouncement(`Location acquired (±${accRound}m). ${sourceMsg}.`);
+    }
+  }, []);
 
   // Acquire Real-Time GPS Location with multi-tier fallback (No timeout blocking)
   const acquireRealTimeLocation = useCallback(() => {
@@ -243,6 +220,7 @@ export function App() {
 
   // Google Maps Style: Direct Street Name or Destination Selection
   const handleSelectSearchDestination = useCallback((coords: [number, number], name: string) => {
+    unlockAudioAndSpeech();
     setDestinationPoint(coords);
     setCustomDestText(name);
     setDestMode('custom_text');
@@ -339,21 +317,40 @@ export function App() {
       params.destPlaceId = destPlaceId;
     }
 
+    unlockAudioAndSpeech();
     calculateRouteFlexible(params)
       .then((res) => {
         setRoute(res);
         setGraphRevision(res.graph_revision);
         setLiveAnnouncement(res.explanation || 'Route calculated.');
         setLoadingRoute(false);
+
+        // If blind camera or low vision profile is active, automatically activate camera assistance and speak
+        if (autoStartBlindCamera || profile.name === 'low_vision') {
+          setIsNavigating(true);
+          setIsBlindCameraOpen(true);
+          const targetName = (destMode === 'custom_text' && customDestText.trim())
+            ? customDestText.trim()
+            : places.find((p) => p.id === destPlaceId)?.name || 'destination';
+          const announceMsg = selectedLanguage === 'ta'
+            ? `${targetName} நோக்கிய பாதை தயாராக உள்ளது. ஏஐ கேமரா கண்காணிக்கிறது.`
+            : selectedLanguage === 'hi'
+            ? `${targetName} का सुगम मार्ग तैयार है। एआई कैमरा बाधाओं की जांच कर रहा है।`
+            : selectedLanguage === 'te'
+            ? `${targetName} మార్గం సిద్ధంగా ఉంది. AI కెమెరా అడ్డంకులను గుర్తిస్తోంది.`
+            : `Route to ${targetName} ready. AI Obstacle Camera activated. Scanning walking path.`;
+          setTimeout(() => speakText(announceMsg, selectedLanguage), 350);
+        }
       })
       .catch((err) => {
         console.error(err);
         setLoadingRoute(false);
       });
-  }, [useRealTimeOrigin, userLocation, originPlaceId, destMode, destinationPoint, customDestText, destPlaceId, profile, strictness]);
+  }, [useRealTimeOrigin, userLocation, originPlaceId, destMode, destinationPoint, customDestText, destPlaceId, profile, strictness, autoStartBlindCamera, selectedLanguage, places]);
 
   // 1-Click Blind Navigation and AI Camera starter
   const handleStartBlindNavigation = useCallback(() => {
+    unlockAudioAndSpeech();
     setAutoStartBlindCamera(true);
     setIsNavigating(true);
     setIsBlindCameraOpen(true);
@@ -523,9 +520,9 @@ export function App() {
             </button>
           </nav>
 
-          {/* Real-Time GPS Quick Status, Blind Radar, Language Picker & Revision */}
+          {/* Real-Time Location Quick Status, Camera Assistance, Language Picker & Revision */}
           <div className="flex flex-wrap items-center gap-2">
-            {/* Blind Vision Radar Header Button */}
+            {/* Camera Assistance Header Button */}
             <button
               type="button"
               onClick={() => setIsBlindCameraOpen(!isBlindCameraOpen)}
@@ -534,10 +531,10 @@ export function App() {
                   ? 'bg-rose-600 text-white border-rose-700 animate-pulse'
                   : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
               }`}
-              title="Toggle Live Blind Walking Camera & Obstacle Detector"
+              title="Toggle Live Camera Obstacle Assistance"
             >
               <Eye className="w-3.5 h-3.5 text-indigo-600" />
-              <span>{isBlindCameraOpen ? 'Close Radar' : 'Blind Radar'}</span>
+              <span>{isBlindCameraOpen ? 'Close Camera' : 'Camera Assistance'}</span>
             </button>
 
             {/* Multilingual Voice Language Picker */}
@@ -563,12 +560,21 @@ export function App() {
               disabled={isLocating}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${
                 userLocation
-                  ? 'bg-blue-50 text-blue-800 border-blue-300'
+                  ? (userLocationAccuracy && userLocationAccuracy > 30
+                      ? 'bg-amber-50 text-amber-900 border-amber-300'
+                      : 'bg-blue-50 text-blue-800 border-blue-300')
                   : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
               }`}
+              title={userLocationAccuracy ? `Accuracy radius: ±${Math.round(userLocationAccuracy)} m` : 'Click to acquire location'}
             >
               <LocateFixed className={`w-3.5 h-3.5 ${isLocating ? 'animate-spin text-blue-600' : 'text-blue-600'}`} />
-              <span>{userLocation ? 'GPS Acquired' : 'Locate Me'}</span>
+              <span>
+                {isLocating
+                  ? 'Locating...'
+                  : userLocation
+                  ? `Location acquired (±${Math.round(userLocationAccuracy || 15)}m)`
+                  : 'Locate Me'}
+              </span>
             </button>
 
             <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-1 rounded-full text-xs font-bold">

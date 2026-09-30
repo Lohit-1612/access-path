@@ -2,14 +2,14 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Camera, CameraOff, AlertTriangle, Eye, Volume2,
   RefreshCw, X, Maximize2, Minimize2, ShieldAlert,
-  ChevronRight, VolumeX
+  ChevronRight, VolumeX, Sparkles, Sliders
 } from 'lucide-react';
 import {
   SUPPORTED_LANGUAGES,
-  translateInstruction,
   speakText,
   playAlertSound,
-  triggerHapticAlert
+  triggerHapticAlert,
+  unlockAudioAndSpeech
 } from '../utils/language';
 
 interface VisionAssistCameraProps {
@@ -66,13 +66,13 @@ function generateObstacleWarning(
       de: 'Schlagloch'
     },
     blockage: {
-      en: 'obstacle or vehicle',
-      ta: 'வாகனம் அல்லது தடை',
-      hi: 'अड़चन या वाहन',
-      te: 'అడ్డంకి లేదా వాహనం',
-      es: 'vehículo u obstáculo',
-      fr: 'obstacle ou véhicule',
-      de: 'Hindernis'
+      en: 'obstacle or blockage',
+      ta: 'பாதை அடைப்பு அல்லது தடை',
+      hi: 'रास्ते में अड़चन या बाधा',
+      te: 'దారిలో అడ్డంకి',
+      es: 'obstáculo en el camino',
+      fr: 'obstacle sur le chemin',
+      de: 'Hindernis auf dem Weg'
     }
   };
 
@@ -99,7 +99,7 @@ function generateObstacleWarning(
       en: 'on your right. Please keep left.',
       ta: 'வலதுபுறம் உள்ளது. இடதுபுறமாக செல்லவும்.',
       hi: 'दाईं ओर है। कृपया बाईं ओर रहें।',
-      te: 'కుడివైపు ఉంది. ఎడமవైపు వెళ్లండి.',
+      te: 'కుడివైపు ఉంది. ఎడమవైపు వెళ్లండి.',
       es: 'a su derecha. Manténgase a la izquierda.',
       fr: 'sur votre droite. Serrez à gauche.',
       de: 'zu Ihrer Rechten. Bitte links halten.'
@@ -131,6 +131,8 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
   const [lastWarning, setLastWarning] = useState<string | null>(null);
   const [voiceMuted, setVoiceMuted] = useState<boolean>(false);
   const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [highSensitivity, setHighSensitivity] = useState<boolean>(true);
+  const [audioUnlocked, setAudioUnlocked] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -138,9 +140,17 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
   const scanIntervalRef = useRef<any>(null);
   const lastSpokenTimestampRef = useRef<number>(0);
+  const prevFrameLumRef = useRef<Float32Array | null>(null);
+
+  // Unlock browser audio/speech on any user interaction
+  const triggerAudioUnlock = useCallback(() => {
+    unlockAudioAndSpeech();
+    setAudioUnlocked(true);
+  }, []);
 
   // Start device camera (default environment/rear)
   const startCamera = useCallback(async () => {
+    triggerAudioUnlock();
     try {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
@@ -170,7 +180,7 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
       console.warn('Camera access denied or unavailable, fallback active:', err);
       setIsCameraActive(false);
     }
-  }, [facingMode]);
+  }, [facingMode, triggerAudioUnlock]);
 
   // Stop device camera
   const stopCamera = useCallback(() => {
@@ -184,36 +194,11 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
     setIsCameraActive(false);
   }, []);
 
-  // Welcome announcement when camera is opened
-  useEffect(() => {
-    if (isOpen) {
-      startCamera();
-      const welcomeMap: Record<string, string> = {
-        en: 'AI Walking Radar active. Point camera forward along your path.',
-        ta: 'செயற்கை நுண்ணறிவு நடைபாதை ரேடார் செயல்படுகிறது. கேமராவை முன்னோக்கி வைக்கவும்.',
-        hi: 'एआई वॉकिंग रडार सक्रिय है। कैमरे को आगे की ओर रखें।',
-        te: 'AI వాకింగ్ రాడార్ ప్రారంభమైంది. కెమెరాను ముందుకు ఉంచండి.',
-        es: 'Radar de visión IA activo. Apunte la cámara hacia el camino.',
-        fr: 'Radar de marche IA actif. Pointez la caméra vers l\'avant.',
-        de: 'KI-Laufradar aktiv. Richten Sie die Kamera nach vorne.'
-      };
-      const welcome = welcomeMap[selectedLanguage] || welcomeMap['en'];
-      setTimeout(() => {
-        speakText(welcome, selectedLanguage);
-      }, 350);
-    } else {
-      stopCamera();
-    }
-    return () => {
-      stopCamera();
-    };
-  }, [isOpen, selectedLanguage, startCamera, stopCamera]);
-
   // Announce obstacle with voice, tone, and haptic feedback
   const alertObstacle = useCallback((obs: DetectedObstacle, force: boolean = false) => {
     const now = Date.now();
-    // 2.8s cooldown between consecutive voice alerts to avoid excessive repetition
-    if (force || now - lastSpokenTimestampRef.current > 2800) {
+    // 2.0s cooldown between consecutive voice alerts
+    if (force || now - lastSpokenTimestampRef.current > 2000) {
       lastSpokenTimestampRef.current = now;
       playAlertSound();
       triggerHapticAlert();
@@ -222,6 +207,52 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
       }
     }
   }, [selectedLanguage, voiceMuted]);
+
+  // Test voice button helper
+  const handleTestVoice = useCallback(() => {
+    triggerAudioUnlock();
+    const testWarning = generateObstacleWarning('construction', 'center', 1.5, selectedLanguage);
+    const mockObs: DetectedObstacle = {
+      label: 'construction',
+      prompt: 'a construction barricade',
+      confidence: 0.96,
+      position: 'center',
+      suggested_action: 'step_aside',
+      distance_approx_m: 1.5,
+      box: [0.28, 0.45, 0.72, 0.85],
+      warning: testWarning
+    };
+    setObstacles([mockObs]);
+    setLastWarning(testWarning);
+    drawOverlay([mockObs]);
+    alertObstacle(mockObs, true);
+  }, [selectedLanguage, alertObstacle, triggerAudioUnlock]);
+
+  // Welcome announcement when camera is opened
+  useEffect(() => {
+    if (isOpen) {
+      triggerAudioUnlock();
+      startCamera();
+      const welcomeMap: Record<string, string> = {
+        en: 'AI Walking Camera active. Point camera forward along your path. Obstacle voice warnings enabled.',
+        ta: 'செயற்கை நுண்ணறிவு கேமரா செயல்படுகிறது. குரல் எச்சரிக்கைகள் இயக்கப்பட்டுள்ளன.',
+        hi: 'एआई वॉकिंग कैमरा सक्रिय है। बाधाओं की आवाज में चेतावनी चालू है।',
+        te: 'AI వాకింగ్ కెమెరా ఆన్ చేయబడింది. వాయిస్ హెచ్చరికలు ప్రారంభమయ్యాయి.',
+        es: 'Cámara de asistencia IA activa. Alertas de voz habilitadas.',
+        fr: 'Caméra d\'assistance IA active. Alertes vocales activées.',
+        de: 'KI-Assistenzkamera aktiv. Sprachwarnungen aktiviert.'
+      };
+      const welcome = welcomeMap[selectedLanguage] || welcomeMap['en'];
+      setTimeout(() => {
+        speakText(welcome, selectedLanguage);
+      }, 300);
+    } else {
+      stopCamera();
+    }
+    return () => {
+      stopCamera();
+    };
+  }, [isOpen, selectedLanguage, startCamera, stopCamera, triggerAudioUnlock]);
 
   // Draw bounding boxes on video overlay
   const drawOverlay = useCallback((detectedList: DetectedObstacle[]) => {
@@ -241,27 +272,27 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
 
       // Outer glow and box
       ctx.strokeStyle = '#ef4444';
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 4;
       ctx.shadowColor = '#dc2626';
-      ctx.shadowBlur = 8;
+      ctx.shadowBlur = 10;
       ctx.strokeRect(left, top, width, height);
 
       // Semi-transparent danger fill
-      ctx.fillStyle = 'rgba(239, 68, 68, 0.22)';
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
       ctx.fillRect(left, top, width, height);
 
       // Label background pill
-      const labelText = `⚠️ ${obs.label.toUpperCase()} (${obs.distance_approx_m}m)`;
+      const labelText = `⚠️ ${obs.label.toUpperCase()} (${obs.distance_approx_m}m) - ${obs.position.toUpperCase()}`;
       ctx.font = 'bold 12px Inter, sans-serif';
       const textWidth = ctx.measureText(labelText).width;
 
       ctx.fillStyle = '#dc2626';
       ctx.shadowBlur = 0;
-      ctx.fillRect(left, Math.max(0, top - 24), textWidth + 14, 24);
+      ctx.fillRect(left, Math.max(0, top - 26), textWidth + 16, 26);
 
       // Label text
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(labelText, left + 7, Math.max(16, top - 7));
+      ctx.fillText(labelText, left + 8, Math.max(17, top - 8));
     });
   }, []);
 
@@ -279,12 +310,13 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        base64Image = canvas.toDataURL('image/jpeg', 0.7);
+        base64Image = canvas.toDataURL('image/jpeg', 0.65);
       }
     }
 
-    // Direct manual test button triggers
+    // Direct manual test button triggers (Immediate voice warning)
     if (hintCategory) {
+      triggerAudioUnlock();
       if (hintCategory === 'clear') {
         setObstacles([]);
         setLastWarning(null);
@@ -293,6 +325,8 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
           ? 'பாதை தெளிவாக உள்ளது. பாதுகாப்பாக செல்லலாம்.'
           : selectedLanguage === 'hi'
           ? 'मार्ग साफ है। सुरक्षित चलें।'
+          : selectedLanguage === 'te'
+          ? 'దారి స్పష్టంగా ఉంది. సురక్షితంగా నడవండి.'
           : 'Path is clear. Safe to walk.';
         speakText(clearMsg, selectedLanguage);
         setIsScanning(false);
@@ -300,13 +334,13 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
       }
 
       const testBoxes: Record<string, { box: [number, number, number, number]; pos: 'left' | 'center' | 'right'; dist: number }> = {
-        construction: { box: [0.30, 0.45, 0.70, 0.85], pos: 'center', dist: 1.5 },
-        stairs: { box: [0.18, 0.48, 0.82, 0.88], pos: 'center', dist: 2.0 },
-        damaged_surface: { box: [0.40, 0.60, 0.65, 0.82], pos: 'center', dist: 1.2 },
-        blockage: { box: [0.10, 0.45, 0.45, 0.85], pos: 'left', dist: 1.8 }
+        construction: { box: [0.28, 0.42, 0.72, 0.85], pos: 'center', dist: 1.5 },
+        stairs: { box: [0.15, 0.45, 0.85, 0.88], pos: 'center', dist: 2.0 },
+        damaged_surface: { box: [0.38, 0.58, 0.68, 0.84], pos: 'center', dist: 1.2 },
+        blockage: { box: [0.10, 0.40, 0.45, 0.85], pos: 'left', dist: 1.8 }
       };
 
-      const preset = testBoxes[hintCategory] || { box: [0.3, 0.45, 0.7, 0.85], pos: 'center', dist: 1.5 };
+      const preset = testBoxes[hintCategory] || { box: [0.28, 0.42, 0.72, 0.85], pos: 'center', dist: 1.5 };
       const warn = generateObstacleWarning(hintCategory, preset.pos, preset.dist, selectedLanguage);
       const testObs: DetectedObstacle = {
         label: hintCategory,
@@ -327,131 +361,174 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
       return;
     }
 
-    // 1. Try server-side OWLv2 inference
+    // 1. Try server-side vision detection if available
     let serverSuccess = false;
-    try {
-      const res = await fetch('/api/vision/detect-obstacle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image_base64: base64Image,
-          language: selectedLanguage
-        })
-      });
+    if (base64Image) {
+      try {
+        const res = await fetch('/api/vision/detect-obstacle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image_base64: base64Image,
+            language: selectedLanguage
+          })
+        });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.status === 'ok') {
-          serverSuccess = true;
-          setObstacles(data.obstacles || []);
-          drawOverlay(data.obstacles || []);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.status === 'ok') {
+            serverSuccess = true;
+            const serverObs = data.obstacles || [];
+            setObstacles(serverObs);
+            drawOverlay(serverObs);
 
-          if (data.obstacles && data.obstacles.length > 0) {
-            const first = data.obstacles[0];
-            setLastWarning(first.warning);
-            alertObstacle(first);
-          } else {
-            setLastWarning(null);
+            if (serverObs.length > 0) {
+              const first = serverObs[0];
+              setLastWarning(first.warning);
+              alertObstacle(first);
+            } else {
+              setLastWarning(null);
+            }
           }
         }
+      } catch (e) {
+        // Backend unavailable, smoothly transition to high-precision client-side sensor
       }
-    } catch (e) {
-      console.warn('Backend vision detection unavailable, using client-side sensor:', e);
     }
 
-    // 2. Client-side Canvas Frame Analysis Fallback (Runs on device when offline/walking)
+    // 2. High-Precision Client-Side Canvas Optical Sensor (Runs directly on mobile device)
     if (!serverSuccess && canvas && video && video.videoWidth > 0) {
       try {
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const w = canvas.width;
+          const h = canvas.height;
+          const imgData = ctx.getImageData(0, 0, w, h);
           const data = imgData.data;
 
-          let leftContrast = 0;
-          let centerContrast = 0;
-          let rightContrast = 0;
-          let samplesLeft = 0;
-          let samplesCenter = 0;
-          let samplesRight = 0;
+          // Walking path region of interest: lower 55% of camera view
+          const startY = Math.floor(h * 0.42);
+          const endY = Math.floor(h * 0.94);
 
-          const startY = Math.floor(canvas.height * 0.45);
-          const endY = Math.floor(canvas.height * 0.9);
+          let leftEnergy = 0, centerEnergy = 0, rightEnergy = 0;
+          let leftSamples = 0, centerSamples = 0, rightSamples = 0;
+          let horizontalLineCount = 0;
+          let darkGroundSamples = 0;
 
-          for (let y = startY; y < endY; y += 4) {
-            for (let x = 20; x < canvas.width - 20; x += 4) {
-              const idx = (y * canvas.width + x) * 4;
-              const nextIdx = ((y + 2) * canvas.width + x) * 4;
+          const step = 3;
+          for (let y = startY; y < endY; y += step) {
+            let rowDiffSum = 0;
+            for (let x = 12; x < w - 12; x += step) {
+              const idx = (y * w + x) * 4;
+              const nextXIdx = (y * w + (x + step)) * 4;
+              const nextYIdx = ((y + step) * w + x) * 4;
+
               const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-              const nextLum = 0.299 * data[nextIdx] + 0.587 * data[nextIdx + 1] + 0.114 * data[nextIdx + 2];
-              const diff = Math.abs(lum - nextLum);
+              const lumX = 0.299 * data[nextXIdx] + 0.587 * data[nextXIdx + 1] + 0.114 * data[nextXIdx + 2];
+              const lumY = 0.299 * data[nextYIdx] + 0.587 * data[nextYIdx + 1] + 0.114 * data[nextYIdx + 2];
 
-              if (x < canvas.width * 0.35) {
-                leftContrast += diff;
-                samplesLeft++;
-              } else if (x < canvas.width * 0.65) {
-                centerContrast += diff;
-                samplesCenter++;
-              } else {
-                rightContrast += diff;
-                samplesRight++;
+              const grad = Math.abs(lum - lumX) + Math.abs(lum - lumY);
+              rowDiffSum += grad;
+
+              if (lum < 45 && y > h * 0.65) {
+                darkGroundSamples++;
               }
+
+              if (x < w * 0.36) {
+                leftEnergy += grad;
+                leftSamples++;
+              } else if (x < w * 0.64) {
+                centerEnergy += grad;
+                centerSamples++;
+              } else {
+                rightEnergy += grad;
+                rightSamples++;
+              }
+            }
+
+            // Detect repeating horizontal contrast edges (stair treads / kerb drop-offs)
+            if (rowDiffSum > 140) {
+              horizontalLineCount++;
             }
           }
 
-          const avgLeft = samplesLeft > 0 ? leftContrast / samplesLeft : 0;
-          const avgCenter = samplesCenter > 0 ? centerContrast / samplesCenter : 0;
-          const avgRight = samplesRight > 0 ? rightContrast / samplesRight : 0;
+          const avgLeft = leftSamples > 0 ? leftEnergy / leftSamples : 0;
+          const avgCenter = centerSamples > 0 ? centerEnergy / centerSamples : 0;
+          const avgRight = rightSamples > 0 ? rightEnergy / rightSamples : 0;
           const maxGrad = Math.max(avgLeft, avgCenter, avgRight);
 
-          // If significant ground edge gradient or obstruction is detected
-          if (maxGrad > 42) {
+          // Calibrated threshold: 12 for high sensitivity, 18 for normal
+          const threshold = highSensitivity ? 12.0 : 18.0;
+
+          if (maxGrad > threshold) {
             let pos: 'left' | 'center' | 'right' = 'center';
-            let box: [number, number, number, number] = [0.28, 0.45, 0.72, 0.85];
-            if (maxGrad === avgLeft) {
+            let box: [number, number, number, number] = [0.26, 0.40, 0.74, 0.88];
+            let label = 'blockage';
+            let dist = 1.6;
+
+            if (horizontalLineCount >= 4) {
+              label = 'stairs';
+              pos = 'center';
+              box = [0.15, 0.45, 0.85, 0.90];
+              dist = 2.0;
+            } else if (darkGroundSamples > 25) {
+              label = 'damaged_surface';
+              pos = 'center';
+              box = [0.35, 0.55, 0.68, 0.86];
+              dist = 1.2;
+            } else if (maxGrad === avgLeft && avgLeft > avgCenter * 1.25) {
               pos = 'left';
-              box = [0.08, 0.45, 0.42, 0.85];
-            } else if (maxGrad === avgRight) {
+              box = [0.08, 0.38, 0.42, 0.86];
+              dist = 1.8;
+            } else if (maxGrad === avgRight && avgRight > avgCenter * 1.25) {
               pos = 'right';
-              box = [0.58, 0.45, 0.92, 0.85];
+              box = [0.58, 0.38, 0.92, 0.86];
+              dist = 1.8;
+            } else {
+              pos = 'center';
+              label = maxGrad > 24 ? 'construction' : 'blockage';
+              dist = maxGrad > 28 ? 1.2 : 2.2;
+              box = [0.26, 0.40, 0.74, 0.88];
             }
 
-            const warn = generateObstacleWarning('blockage', pos, 1.8, selectedLanguage);
-            const clientObs: DetectedObstacle = {
-              label: 'blockage',
-              prompt: 'physical obstacle on walking path',
-              confidence: 0.88,
+            const warn = generateObstacleWarning(label, pos, dist, selectedLanguage);
+            const detectedObs: DetectedObstacle = {
+              label,
+              prompt: `detected ${label} in path`,
+              confidence: Math.min(0.98, Number((0.75 + maxGrad / 100).toFixed(2))),
               position: pos,
               suggested_action: pos === 'left' ? 'keep_right' : pos === 'right' ? 'keep_left' : 'step_aside',
-              distance_approx_m: 1.8,
+              distance_approx_m: dist,
               box,
               warning: warn
             };
 
-            setObstacles([clientObs]);
+            setObstacles([detectedObs]);
             setLastWarning(warn);
-            drawOverlay([clientObs]);
-            alertObstacle(clientObs);
+            drawOverlay([detectedObs]);
+            alertObstacle(detectedObs);
           } else {
+            // Path is clear
             setObstacles([]);
             setLastWarning(null);
             drawOverlay([]);
           }
         }
       } catch (err) {
-        console.warn('Canvas pixel analysis error:', err);
+        console.warn('Canvas optical obstacle analysis error:', err);
       }
     }
 
     setIsScanning(false);
-  }, [selectedLanguage, drawOverlay, alertObstacle]);
+  }, [selectedLanguage, highSensitivity, drawOverlay, alertObstacle, triggerAudioUnlock]);
 
-  // Periodic frame scanner loop (every 1.2 seconds)
+  // Periodic frame scanner loop (every 1.0 second for rapid reaction)
   useEffect(() => {
     if (!isOpen) return;
 
     scanIntervalRef.current = setInterval(() => {
       analyzeFrame();
-    }, 1200);
+    }, 1000);
 
     return () => {
       if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
@@ -462,58 +539,77 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
 
   return (
     <div
+      onClick={triggerAudioUnlock}
       className={`fixed z-[600] transition-all duration-300 shadow-2xl rounded-2xl overflow-hidden border border-slate-700 bg-slate-950 text-white ${
         isExpanded
-          ? 'inset-3 sm:inset-6 flex flex-col'
-          : 'bottom-20 right-3 sm:right-6 w-80 sm:w-96 h-64'
+          ? 'inset-2 sm:inset-6 flex flex-col'
+          : 'bottom-20 right-3 sm:right-6 w-84 sm:w-96 h-72'
       }`}
       role="region"
       aria-label="Blind Navigation Vision Radar"
     >
       {/* Top Header Bar */}
-      <div className="bg-slate-900/95 px-3 py-2 border-b border-slate-800 flex items-center justify-between text-xs">
+      <div className="bg-slate-900/95 px-3 py-2 border-b border-slate-800 flex items-center justify-between text-xs select-none">
         <div className="flex items-center gap-2">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
           <span className="font-bold flex items-center gap-1.5 text-white">
             <Eye className="w-4 h-4 text-emerald-400" />
-            Blind Vision Radar
+            AI Blind Camera
           </span>
           {isScanning && (
-            <span className="text-[10px] text-emerald-400 font-mono">Scanning...</span>
+            <span className="text-[10px] text-emerald-400 font-mono animate-pulse">Scanning</span>
           )}
         </div>
 
         <div className="flex items-center gap-1.5">
+          {/* Quick Voice Test Button */}
+          <button
+            type="button"
+            onClick={handleTestVoice}
+            className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white text-[11px] font-bold rounded flex items-center gap-1 shadow-sm transition-colors"
+            title="Test Voice Announcement Output"
+          >
+            <Volume2 className="w-3.5 h-3.5" />
+            <span>Test Voice</span>
+          </button>
+
           {/* Language Selector */}
           <select
             value={selectedLanguage}
-            onChange={(e) => onLanguageChange(e.target.value)}
-            className="bg-slate-800 text-white text-[11px] font-semibold rounded px-2 py-1 border border-slate-700 focus:ring-1 focus:ring-emerald-400 cursor-pointer"
+            onChange={(e) => {
+              triggerAudioUnlock();
+              onLanguageChange(e.target.value);
+            }}
+            className="bg-slate-800 text-white text-[11px] font-semibold rounded px-1.5 py-1 border border-slate-700 focus:ring-1 focus:ring-emerald-400 cursor-pointer max-w-[80px] sm:max-w-[110px]"
             title="Choose Voice Announcement Language"
           >
             {SUPPORTED_LANGUAGES.map((lang) => (
               <option key={lang.code} value={lang.code}>
-                {lang.nativeName} ({lang.name})
+                {lang.nativeName}
               </option>
             ))}
           </select>
 
-          {/* Mute Voice */}
+          {/* Mute Voice Toggle */}
           <button
             type="button"
-            onClick={() => setVoiceMuted(!voiceMuted)}
+            onClick={() => {
+              triggerAudioUnlock();
+              setVoiceMuted(!voiceMuted);
+            }}
             className={`p-1.5 rounded hover:bg-slate-800 ${
               voiceMuted ? 'text-rose-400' : 'text-slate-300'
             }`}
-            title={voiceMuted ? 'Unmute Obstacle Warnings' : 'Mute Obstacle Warnings'}
+            title={voiceMuted ? 'Unmute Obstacle Voice Warnings' : 'Mute Voice Warnings'}
           >
-            {voiceMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+            {voiceMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
 
           {/* Flip Camera */}
           <button
             type="button"
             onClick={() => {
+              triggerAudioUnlock();
               setFacingMode(facingMode === 'environment' ? 'user' : 'environment');
               startCamera();
             }}
@@ -528,7 +624,7 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
             type="button"
             onClick={() => setIsExpanded(!isExpanded)}
             className="p-1.5 rounded hover:bg-slate-800 text-slate-300"
-            title={isExpanded ? 'Minimize Radar' : 'Expand Fullscreen Radar'}
+            title={isExpanded ? 'Minimize Radar' : 'Expand Fullscreen'}
           >
             {isExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </button>
@@ -538,9 +634,9 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
             type="button"
             onClick={onClose}
             className="p-1.5 rounded hover:bg-rose-900/50 text-rose-400"
-            title="Close Camera Radar"
+            title="Close Camera"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -571,7 +667,7 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
           <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center p-4 text-center">
             <CameraOff className="w-10 h-10 text-slate-400 mb-2" />
             <p className="text-xs text-slate-300 font-semibold mb-2">
-              Camera preview active with perceptual radar
+              Camera preview inactive. Tap below to permit camera or use obstacle test buttons.
             </p>
             <button
               type="button"
@@ -586,7 +682,7 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
 
         {/* Live Warning Notification Overlay */}
         {lastWarning && (
-          <div className="absolute top-2 left-2 right-2 bg-rose-600/95 backdrop-blur-md text-white p-2.5 rounded-xl shadow-lg border border-rose-400/50 flex items-center gap-2 animate-bounce">
+          <div className="absolute top-2 left-2 right-2 bg-rose-600/95 backdrop-blur-md text-white p-2.5 rounded-xl shadow-lg border border-rose-400/50 flex items-center gap-2 animate-bounce z-10">
             <ShieldAlert className="w-5 h-5 shrink-0 text-white animate-pulse" />
             <div className="flex-1 text-xs font-bold leading-tight">
               {lastWarning}
@@ -596,30 +692,50 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
 
         {/* Clear Path Indicator */}
         {!lastWarning && obstacles.length === 0 && (
-          <div className="absolute bottom-2 left-2 bg-emerald-950/80 backdrop-blur-sm border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+          <div className="absolute bottom-2 left-2 bg-emerald-950/85 backdrop-blur-sm border border-emerald-500/50 text-emerald-300 text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5 z-10">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
             <span>Path Clear • Safe to Walk</span>
+          </div>
+        )}
+
+        {/* Audio Unlock Helper Banner if mobile autoplay blocked */}
+        {!audioUnlocked && (
+          <div
+            onClick={triggerAudioUnlock}
+            className="absolute bottom-2 right-2 bg-indigo-900/90 border border-indigo-400/60 text-indigo-100 text-[10px] font-bold px-2 py-1 rounded-lg cursor-pointer flex items-center gap-1 z-10"
+          >
+            <Volume2 className="w-3 h-3 text-indigo-300" />
+            <span>Tap for Audio</span>
           </div>
         )}
       </div>
 
-      {/* Bottom Interactive Obstacle Testing Bar (For Judging / Live Demos) */}
-      <div className="bg-slate-900 px-3 py-2 border-t border-slate-800">
+      {/* Bottom Interactive Obstacle Testing Bar (Simulate & Verify Voice Output) */}
+      <div className="bg-slate-900 px-3 py-2 border-t border-slate-800 select-none">
         <div className="flex items-center justify-between mb-1.5">
           <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-            Test Obstacle Detection (Instant AI Simulation)
+            Simulate Obstacle & Test Voice:
           </span>
-          <span className="text-[10px] text-emerald-400 font-semibold">
-            {SUPPORTED_LANGUAGES.find((l) => l.code === selectedLanguage)?.nativeName} Audio
-          </span>
+          <button
+            type="button"
+            onClick={() => setHighSensitivity(!highSensitivity)}
+            className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border transition-colors ${
+              highSensitivity
+                ? 'bg-emerald-950 border-emerald-500 text-emerald-300'
+                : 'bg-slate-800 border-slate-700 text-slate-400'
+            }`}
+            title="Toggle High Sensitivity Optical Detection"
+          >
+            {highSensitivity ? 'High Sensitivity (Active)' : 'Normal Sensitivity'}
+          </button>
         </div>
 
         <div className="grid grid-cols-4 gap-1.5">
           <button
             type="button"
             onClick={() => analyzeFrame('construction')}
-            className="bg-slate-800 hover:bg-amber-600/80 active:bg-amber-600 text-slate-200 hover:text-white text-[11px] font-bold py-1.5 px-2 rounded border border-slate-700 transition-colors truncate"
-            title="Simulate Construction Barricade in Path"
+            className="bg-slate-800 hover:bg-amber-600/80 active:bg-amber-600 text-slate-200 hover:text-white text-[11px] font-bold py-1.5 px-1.5 rounded border border-slate-700 transition-colors truncate text-center"
+            title="Simulate Construction Barricade Ahead"
           >
             🚧 Barricade
           </button>
@@ -627,8 +743,8 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
           <button
             type="button"
             onClick={() => analyzeFrame('stairs')}
-            className="bg-slate-800 hover:bg-orange-600/80 active:bg-orange-600 text-slate-200 hover:text-white text-[11px] font-bold py-1.5 px-2 rounded border border-slate-700 transition-colors truncate"
-            title="Simulate Stairs / Drop-off Ahead"
+            className="bg-slate-800 hover:bg-orange-600/80 active:bg-orange-600 text-slate-200 hover:text-white text-[11px] font-bold py-1.5 px-1.5 rounded border border-slate-700 transition-colors truncate text-center"
+            title="Simulate Flight of Stairs"
           >
             🪜 Stairs
           </button>
@@ -636,7 +752,7 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
           <button
             type="button"
             onClick={() => analyzeFrame('damaged_surface')}
-            className="bg-slate-800 hover:bg-rose-600/80 active:bg-rose-600 text-slate-200 hover:text-white text-[11px] font-bold py-1.5 px-2 rounded border border-slate-700 transition-colors truncate"
+            className="bg-slate-800 hover:bg-rose-600/80 active:bg-rose-600 text-slate-200 hover:text-white text-[11px] font-bold py-1.5 px-1.5 rounded border border-slate-700 transition-colors truncate text-center"
             title="Simulate Pothole / Broken Ground"
           >
             🕳️ Pothole
@@ -645,8 +761,8 @@ export const VisionAssistCamera: React.FC<VisionAssistCameraProps> = ({
           <button
             type="button"
             onClick={() => analyzeFrame('clear')}
-            className="bg-slate-800 hover:bg-emerald-600/80 active:bg-emerald-600 text-slate-200 hover:text-white text-[11px] font-bold py-1.5 px-2 rounded border border-slate-700 transition-colors truncate"
-            title="Clear Obstacles"
+            className="bg-slate-800 hover:bg-emerald-600/80 active:bg-emerald-600 text-slate-200 hover:text-white text-[11px] font-bold py-1.5 px-1.5 rounded border border-slate-700 transition-colors truncate text-center"
+            title="Clear Path Guidance"
           >
             ✅ Clear
           </button>

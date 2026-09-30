@@ -205,15 +205,18 @@ class RoutingEngine:
                     })
                     continue
 
-            # 4. Hard exclusions: Verified complete barrier
+            # 4. Hard exclusions: Verified complete barrier (or pending in strict mode)
             edge_barriers = barriers_by_edge.get(e["id"], [])
             is_completely_blocked = any(b["extent"] == "complete" for b in edge_barriers)
             if is_completely_blocked:
                 b_info = [b for b in edge_barriers if b["extent"] == "complete"][0]
+                is_unverified = (b_info["status"] == "pending")
+                status_label = "unverified report" if is_unverified else "verified barrier"
                 excluded_edges.append({
                     "edge_id": e["id"],
                     "reason": "BLOCKED_EDGE_AVOIDED",
-                    "details": f"{b_info['category']} blocks {e['name'] or 'segment'}"
+                    "is_unverified": is_unverified,
+                    "details": f"{b_info['category']} ({status_label}) blocks {e['name'] or 'segment'}"
                 })
                 continue
 
@@ -357,6 +360,7 @@ class RoutingEngine:
                 warnings.append(step_warning)
                 reason_codes.append(f"PARTIAL_{b_cat.upper()}_ON_ROUTE")
 
+            is_verified = (e_dict["source"] == "survey" and bool(e_dict["checked_at"]))
             route_steps.append(RouteStep(
                 edge_id=e_dict["id"],
                 name=e_dict["name"] or f"{u_name} to {v_name}",
@@ -367,10 +371,27 @@ class RoutingEngine:
                 slope_pct=e_dict["slope_pct"],
                 width_m=e_dict["width_m"],
                 roughness=e_dict["roughness"] or 0.0,
-                warning=step_warning
+                warning=step_warning,
+                source=e_dict["source"] or "unknown",
+                checked_at=str(e_dict["checked_at"]) if e_dict["checked_at"] else None,
+                is_verified=is_verified
             ))
 
         coverage = round((verified_attributes_len / actual_total_len), 2) if actual_total_len > 0 else 1.0
+
+        # Calculate genuine turn maneuvers
+        turn_count = sum(1 for s in route_steps if "turn " in s.instruction.lower())
+
+        verified_segs = sum(1 for s in route_steps if s.is_verified)
+        total_segs = len(route_steps)
+        evidence_breakdown = {
+            "verified_length_m": round(verified_attributes_len, 1),
+            "total_length_m": round(actual_total_len, 1),
+            "verified_segments": verified_segs,
+            "total_segments": total_segs,
+            "surveyed_coverage_pct": round((verified_attributes_len / actual_total_len * 100), 1) if actual_total_len > 0 else 100.0,
+            "data_sources": list(set(s.source for s in route_steps if s.source))
+        }
 
         if profile.exclude_stairs:
             reason_codes.append("STAIRS_EXCLUDED")
@@ -379,6 +400,9 @@ class RoutingEngine:
         blocked_items = [x for x in excluded_edges if x["reason"] == "BLOCKED_EDGE_AVOIDED"]
         if blocked_items:
             reason_codes.append("BLOCKED_EDGE_AVOIDED")
+            if any(x.get("is_unverified") for x in blocked_items):
+                reason_codes.append("UNVERIFIED_BLOCKAGE_AVOIDED")
+                warnings.append("Route diverts around unverified barrier report awaiting verifier confirmation.")
             b_desc = blocked_items[0]["details"]
             explanation = f"Route changed because {b_desc}. The alternative is {round(actual_total_len)} m, avoiding all blocked segments."
         else:
@@ -396,6 +420,8 @@ class RoutingEngine:
             },
             steps=route_steps,
             evidence_coverage=coverage,
+            evidence_breakdown=evidence_breakdown,
+            turn_count=turn_count,
             warnings=list(set(warnings)),
             reason_codes=list(set(reason_codes)),
             explanation=explanation,

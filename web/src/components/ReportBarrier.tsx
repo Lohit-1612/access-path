@@ -28,6 +28,7 @@ export const ReportBarrier: React.FC<ReportBarrierProps> = ({
   onUseUserLocation
 }) => {
   const [subTab, setSubTab] = useState<'mark' | 'active'>('mark');
+  const [submissionRole, setSubmissionRole] = useState<'reporter' | 'verifier'>('reporter');
   const [category, setCategory] = useState('construction');
   const [notes, setNotes] = useState('Obstacle blocking pedestrian pathway.');
   const [selectedSample, setSelectedSample] = useState<string>('construction_east_path.jpg');
@@ -60,19 +61,24 @@ export const ReportBarrier: React.FC<ReportBarrierProps> = ({
     else if (sampleKey.includes('pothole')) setCategory('damaged_surface');
   };
 
-  // Direct 1-Click Barrier Marking (Active for all other users)
+  // Direct 1-Click Barrier Marking
   const handleInstantMark = async () => {
     setMarkingActive(true);
     setErrorMsg(null);
     setSuccessMsg(null);
     try {
-      await markBarrier({
+      const res = await markBarrier({
         category,
         lat: pin[0],
         lon: pin[1],
-        notes
+        notes,
+        role: submissionRole
       });
-      setSuccessMsg(`Barrier marked! Pathway around (${pin[0].toFixed(5)}, ${pin[1].toFixed(5)}) is now blocked for all users.`);
+      if (submissionRole === 'verifier') {
+        setSuccessMsg(`Barrier marked and verified active! Pathways around (${pin[0].toFixed(5)}, ${pin[1].toFixed(5)}) will now be avoided by all users.`);
+      } else {
+        setSuccessMsg(`Barrier submitted as pending (unverified). Strict routes will provisionally avoid this location, and the report has been queued for verifier review.`);
+      }
       if (onBarrierMarked) onBarrierMarked();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to mark barrier.');
@@ -237,19 +243,63 @@ export const ReportBarrier: React.FC<ReportBarrierProps> = ({
             />
           </div>
 
-          {/* Action 1: Instant Mark for all users */}
+          {/* Submission Role Toggle */}
+          <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
+            <div>
+              <span className="text-xs font-bold text-slate-800">Submission Mode:</span>
+              <p className="text-[11px] text-slate-500">
+                {submissionRole === 'reporter'
+                  ? 'Citizen (Enters pending verification; provisional avoidance active)'
+                  : 'Campus Verifier (Enters verified_active immediately)'}
+              </p>
+            </div>
+            <div className="flex items-center gap-1 bg-slate-200 p-0.5 rounded-lg text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setSubmissionRole('reporter')}
+                className={`px-2.5 py-1 rounded-md transition-all ${
+                  submissionRole === 'reporter' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-600'
+                }`}
+              >
+                Citizen
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubmissionRole('verifier')}
+                className={`px-2.5 py-1 rounded-md transition-all ${
+                  submissionRole === 'verifier' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600'
+                }`}
+              >
+                Verifier
+              </button>
+            </div>
+          </div>
+
+          {/* Action 1: Instant Mark */}
           <div className="pt-2">
             <button
               type="button"
               onClick={handleInstantMark}
               disabled={markingActive}
-              className="w-full min-h-[46px] bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2 focus:outline-none focus:ring-4 focus:ring-rose-300 text-sm"
+              className={`w-full min-h-[46px] ${
+                submissionRole === 'verifier'
+                  ? 'bg-rose-600 hover:bg-rose-700 focus:ring-rose-300'
+                  : 'bg-amber-600 hover:bg-amber-700 focus:ring-amber-300'
+              } active:opacity-90 text-white font-bold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2 focus:outline-none focus:ring-4 text-sm`}
             >
               <ShieldAlert className="w-4 h-4 text-white" />
-              <span>{markingActive ? 'Activating Barrier on Map...' : '🚨 Mark Barrier Now (Active for All Users)'}</span>
+              <span>
+                {markingActive
+                  ? 'Processing...'
+                  : submissionRole === 'verifier'
+                  ? '🚨 Mark Verified Barrier (Active Immediately)'
+                  : '⚠️ Submit Barrier Report (Pending Verification)'}
+              </span>
             </button>
             <p className="text-[11px] text-slate-400 text-center mt-1">
-              Immediately blocks this pathway on the shared map so all pedestrian routes avoid it.
+              {submissionRole === 'verifier'
+                ? 'Immediately blocks pathway on shared map for all pedestrian routes.'
+                : 'Enters verification queue. Strict routes provisionally detour around this obstacle.'}
             </p>
           </div>
 
@@ -325,7 +375,7 @@ export const ReportBarrier: React.FC<ReportBarrierProps> = ({
       {subTab === 'active' && (
         <div className="space-y-3">
           <p className="text-xs text-slate-500">
-            Active barriers marked by you and other users. Clicking <strong>Delete</strong> clears the barrier and restores the accessible route for everyone.
+            Active and pending barriers. Citizens can <strong>Report Cleared</strong> to request inspection, or verifiers can <strong>Confirm Resolution</strong> to restore pathways.
           </p>
 
           {activeBarriers.length === 0 ? (
@@ -343,14 +393,18 @@ export const ReportBarrier: React.FC<ReportBarrierProps> = ({
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-100 text-rose-800">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        b.status === 'verified_active' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
+                      }`}>
                         {b.category.replace('_', ' ')}
                       </span>
                       <span className="text-[11px] text-slate-400">
                         {b.freshness_hours}h ago
                       </span>
-                      <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
-                        Active
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                        b.status === 'verified_active' ? 'text-rose-700 bg-rose-50' : 'text-amber-700 bg-amber-50'
+                      }`}>
+                        {b.status === 'verified_active' ? 'Verified Active' : 'Pending Verification'}
                       </span>
                     </div>
 
@@ -363,21 +417,35 @@ export const ReportBarrier: React.FC<ReportBarrierProps> = ({
                     </p>
                   </div>
 
-                  {onDeleteBarrier && (
+                  <div className="flex flex-col gap-1.5 shrink-0">
                     <button
                       type="button"
-                      onClick={() => {
-                        if (window.confirm(`Delete and clear this ${b.category.replace('_', ' ')} barrier? The pathway will immediately become accessible for all users.`)) {
-                          onDeleteBarrier(b.id);
-                        }
+                      onClick={async () => {
+                        const { reportBarrierCleared } = await import('../api');
+                        await reportBarrierCleared(b.id, 'Reported cleared by citizen', 'reporter');
+                        alert('Clearance reported! A verifier will inspect and confirm restoration.');
                       }}
-                      className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-900 border border-rose-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors shrink-0"
-                      title="Clear barrier and reopen pathway"
+                      className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-xs font-semibold transition-colors"
+                      title="Report that this barrier has been removed"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Delete</span>
+                      Report Cleared
                     </button>
-                  )}
+                    {onDeleteBarrier && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (window.confirm(`Verify and confirm resolution of this ${b.category.replace('_', ' ')} barrier? The pathway will immediately become accessible for all users.`)) {
+                            onDeleteBarrier(b.id);
+                          }
+                        }}
+                        className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-md text-xs font-bold flex items-center gap-1 transition-colors"
+                        title="Confirm clearance and resolve"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Resolve</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

@@ -18,23 +18,16 @@ def get_barriers(
     barriers = repo.list_barriers(status_filter=status, limit=limit, offset=offset)
     return barriers
 
+from api.schemas import BarrierItem, MarkBarrierRequest, ReportClearedRequest
 from pydantic import BaseModel
 from fastapi import HTTPException
-
-class MarkBarrierRequest(BaseModel):
-    category: str = "blockage"
-    lat: float
-    lon: float
-    notes: Optional[str] = None
-    reporter_name: Optional[str] = "User"
-    affected_edge_ids: Optional[List[str]] = None
-    extent: Optional[str] = "complete"
 
 @router.post("/barriers/mark")
 def mark_barrier(req: MarkBarrierRequest):
     """
-    Directly mark and activate an accessibility barrier.
-    All users will immediately see it on the map and their routes will avoid it.
+    Mark an accessibility barrier.
+    Citizen user submissions are created as 'pending' (unverified) with provisional route avoidance.
+    Verifiers can pass role='verifier' to activate immediately.
     """
     result = repo.mark_active_barrier(
         category=req.category,
@@ -43,28 +36,47 @@ def mark_barrier(req: MarkBarrierRequest):
         notes=req.notes,
         reporter_name=req.reporter_name or "User",
         affected_edge_ids=req.affected_edge_ids,
-        extent=req.extent or "complete"
+        extent=req.extent or "complete",
+        role=req.role or "reporter"
     )
     return result
 
-@router.delete("/barriers/{barrier_id}")
-def delete_barrier(barrier_id: str, reason: Optional[str] = "Cleared by user"):
+@router.post("/barriers/{barrier_id}/report-cleared")
+def report_barrier_cleared(barrier_id: str, req: ReportClearedRequest = ReportClearedRequest()):
     """
-    Delete or clear an active barrier, immediately restoring the pathway for all users.
+    Report an existing barrier cleared/removed.
+    Citizens submit a clearance notification for verifier inspection.
+    Verifiers can confirm resolution directly.
     """
     try:
-        result = repo.delete_barrier(report_id=barrier_id, reason=reason or "Cleared by user")
+        result = repo.report_barrier_cleared(
+            report_id=barrier_id,
+            reporter_name=req.reporter_name or "User",
+            notes=req.notes or "Cleared / path restored",
+            role=req.role or "reporter"
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@router.delete("/barriers/{barrier_id}")
+def delete_barrier(barrier_id: str, reason: Optional[str] = "Cleared by user", actor_name: Optional[str] = "Campus Verifier"):
+    """
+    Delete or clear an active barrier (Verifier / Admin action), restoring the pathway for all users.
+    """
+    try:
+        result = repo.delete_barrier(report_id=barrier_id, actor_name=actor_name or "Campus Verifier", reason=reason or "Cleared by user")
         return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 @router.post("/barriers/{barrier_id}/delete")
-def delete_barrier_post(barrier_id: str, reason: Optional[str] = "Cleared by user"):
+def delete_barrier_post(barrier_id: str, reason: Optional[str] = "Cleared by user", actor_name: Optional[str] = "Campus Verifier"):
     """
     POST alias for barrier deletion to support all HTTP environments.
     """
     try:
-        result = repo.delete_barrier(report_id=barrier_id, reason=reason or "Cleared by user")
+        result = repo.delete_barrier(report_id=barrier_id, actor_name=actor_name or "Campus Verifier", reason=reason or "Cleared by user")
         return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

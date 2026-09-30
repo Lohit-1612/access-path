@@ -380,9 +380,10 @@ def calculate_route(req: RouteRequest):
             response.steps = added_steps_front + response.steps + added_steps_back
             response.total_distance_m = round(response.total_distance_m + added_distance, 1)
             response.actual_length_m = round(response.actual_length_m + added_distance, 1)
+            response.turn_count = sum(1 for s in response.steps if "turn " in s.instruction.lower())
 
-        if dest_display_name:
+        if dest_display_name and not any(r in response.reason_codes for r in ("BLOCKED_EDGE_AVOIDED", "UNVERIFIED_BLOCKAGE_AVOIDED", "NO_ROUTE_MEETING_CONSTRAINTS")):
             tot_str = f"{round(response.total_distance_m)}m" if response.total_distance_m < 1000 else f"{response.total_distance_m/1000.0:.1f} km"
-            response.explanation = f"Accessible route to {dest_display_name} ({tot_str})."
+            response.explanation = f"Accessible route to {dest_display_name} ({tot_str}). All known barriers and stairs avoided."
 
     return response

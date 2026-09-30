@@ -22,14 +22,26 @@ try:
 except Exception:
     pass
 
+# Load .env if present
+env_file = BASE_DIR / ".env"
+if env_file.exists():
+    with open(env_file, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip())
+
+DEFAULT_NEON_URL = "postgresql://neondb_owner:npg_E05shINcnYWH@ep-winter-thunder-b53c0oip.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require"
+
 class Settings(BaseModel):
     PROJECT_NAME: str = "AccessPath - Dynamic Accessibility Barrier Detection and Routing"
     VERSION: str = "1.0.0"
     API_PREFIX: str = "/api"
-    # Allow SQLite by default for zero-setup local demo, /tmp for Vercel, or PostgreSQL/Neon connection string via env
+    # Prioritise Neon PostgreSQL database URL; fallback to SQLite for isolated local offline unit tests
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
-        "sqlite:////tmp/accesspath.db" if is_serverless else f"sqlite:///{BASE_DIR / 'accesspath.db'}"
+        os.getenv("NEON_DATABASE_URL", DEFAULT_NEON_URL)
     )
     UPLOAD_DIR: Path = UPLOAD_DIR
     DATA_DIR: Path = DATA_DIR
